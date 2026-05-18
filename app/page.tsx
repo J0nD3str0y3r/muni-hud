@@ -6,6 +6,7 @@ import EtaPanel, { type StopPin } from "@/components/EtaPanel";
 import SearchBar, { type Destination } from "@/components/SearchBar";
 import RoutePanel from "@/components/RoutePanel";
 import TurnPanel from "@/components/TurnPanel";
+import TransitCard from "@/components/TransitCard";
 import HudArrow from "@/components/HudArrow";
 import type { RouteOption } from "@/app/api/tripplan/route";
 
@@ -234,16 +235,14 @@ export default function Home() {
             </div>
           )}
 
-          {/* Turn card — bottom right, prominent */}
-          <div className="absolute bottom-6 right-4 z-10">
-            <TurnPanel
+          {/* Bottom right — transit info card + turn arrow stacked */}
+          <div className="absolute bottom-6 right-4 z-10 flex flex-col items-end gap-2">
+            <TransitCard
               route={activeRoute}
               coords={coords}
-              destination={{
-                name: destination?.name ?? "",
-                arrivalTime: activeRoute.arrivalTime,
-              }}
+              destinationName={destination?.name ?? ""}
             />
+            <TurnPanel route={activeRoute} coords={coords} />
           </div>
         </>
       ) : (
