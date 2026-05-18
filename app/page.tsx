@@ -6,6 +6,7 @@ import EtaPanel, { type StopPin } from "@/components/EtaPanel";
 import SearchBar, { type Destination } from "@/components/SearchBar";
 import RoutePanel from "@/components/RoutePanel";
 import TurnPanel from "@/components/TurnPanel";
+import HudArrow from "@/components/HudArrow";
 import type { RouteOption } from "@/app/api/tripplan/route";
 
 // mapbox-gl uses browser-only APIs — never SSR
@@ -210,6 +211,11 @@ export default function Home() {
         <div className="absolute top-0 left-0 right-0 z-50 bg-yellow-500/80 text-black text-[10px] font-bold tracking-widest text-center py-1 uppercase">
           Spoof mode — fake bike route active
         </div>
+      )}
+
+      {/* HUD arrow — visible during active navigation */}
+      {activeRoute && coords && destination && (
+        <HudArrow coords={coords} destination={destination} />
       )}
 
       {activeRoute ? (
