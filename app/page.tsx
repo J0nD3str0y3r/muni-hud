@@ -21,26 +21,44 @@ export type Coords = {
 
 type LocationState = "idle" | "waiting" | "active" | "denied" | "unavailable";
 
-// Fake bike route through SF (Mission → Embarcadero area)
+// Realistic bike route: 1188 Mission St → Pier 39
+// Path: east on Mission → north on 4th → east on Market → north on Embarcadero → Pier 39
 const SPOOF_ROUTE: [number, number][] = [
-  [37.77855, -122.41275],
-  [37.77945, -122.41120],
-  [37.78080, -122.40990],
-  [37.78250, -122.40890],
-  [37.78470, -122.40730],
-  [37.78720, -122.40510],
-  [37.78980, -122.40320],
-  [37.79240, -122.40100],
-  [37.79480, -122.39840],
-  [37.79700, -122.39590],
-  [37.79880, -122.39310],
-  [37.80060, -122.39040],
-  [37.80220, -122.38800],
-  [37.80400, -122.38570],
-  [37.80610, -122.38350],
-  [37.80800, -122.38160],
+  [37.7762, -122.4133], // 1188 Mission St (start)
+  [37.7761, -122.4115], // Mission & 7th
+  [37.7760, -122.4095], // Mission & 6th
+  [37.7758, -122.4073], // Mission & 5th
+  [37.7758, -122.4057], // Mission & 4th — turn north
+  [37.7775, -122.4055], // 4th St northbound
+  [37.7795, -122.4053],
+  [37.7815, -122.4051],
+  [37.7835, -122.4050], // 4th & Market — turn east
+  [37.7838, -122.4028], // Market St eastbound
+  [37.7843, -122.4002],
+  [37.7850, -122.3975],
+  [37.7858, -122.3952],
+  [37.7868, -122.3942],
+  [37.7885, -122.3939],
+  [37.7905, -122.3938],
+  [37.7928, -122.3937],
+  [37.7952, -122.3937], // Ferry Building / Embarcadero — turn north
+  [37.7970, -122.3938], // Embarcadero northbound
+  [37.7988, -122.3940],
+  [37.8005, -122.3942],
+  [37.8020, -122.3945],
+  [37.8035, -122.3948],
+  [37.8048, -122.3953],
+  [37.8056, -122.3962],
+  [37.8063, -122.3973],
+  [37.8069, -122.3985],
+  [37.8074, -122.3998],
+  [37.8078, -122.4015],
+  [37.8082, -122.4035],
+  [37.8085, -122.4058],
+  [37.8087, -122.4078],
+  [37.8087, -122.4098], // Pier 39 (end)
 ];
-const SPOOF_INTERVAL_MS = 2000; // step every 2 seconds
+const SPOOF_INTERVAL_MS = 1500; // step every 1.5 seconds
 
 function bearingDeg(lat1: number, lng1: number, lat2: number, lng2: number) {
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
