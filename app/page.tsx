@@ -108,47 +108,64 @@ export default function Home() {
     <main className="relative w-screen h-screen bg-black">
       <Map coords={coords} route={activeRoute} stopPin={stopPin} />
 
-      {/* Search bar — full width at top */}
-      <div className="absolute top-4 left-4 right-4 z-10">
-        <SearchBar
-          userCoords={coords}
-          onSelect={setDestination}
-          onClear={handleClearDestination}
-          hasDestination={!!destination}
-        />
-      </div>
+      {activeRoute ? (
+        /* ── NAVIGATION MODE ── */
+        <>
+          {/* Turn card — top right, prominent */}
+          <div className="absolute top-4 right-4 z-10">
+            <TurnPanel route={activeRoute} coords={coords} />
+          </div>
 
-      {/* Route options — below search */}
-      {destination && coords && (
-        <div className="absolute top-16 left-4 right-4 z-10">
-          <RoutePanel
-            userCoords={coords}
-            destination={destination}
-            onSelectRoute={(r) => setActiveRoute(r)}
-            onCancel={handleClearDestination}
-            activeRoute={activeRoute}
-          />
-        </div>
+          {/* Compact route strip — top left (doesn't overlap turn card) */}
+          {destination && coords && (
+            <div className="absolute top-4 left-4 z-10" style={{ right: "150px" }}>
+              <RoutePanel
+                userCoords={coords}
+                destination={destination}
+                onSelectRoute={(r) => setActiveRoute(r)}
+                onCancel={handleClearDestination}
+                activeRoute={activeRoute}
+              />
+            </div>
+          )}
+
+          {/* Nav summary — right side middle */}
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
+            <NavPanel route={activeRoute} coords={coords} />
+          </div>
+        </>
+      ) : (
+        /* ── BROWSE MODE ── */
+        <>
+          {/* Search bar — full width at top */}
+          <div className="absolute top-4 left-4 right-4 z-10">
+            <SearchBar
+              userCoords={coords}
+              onSelect={setDestination}
+              onClear={handleClearDestination}
+              hasDestination={!!destination}
+            />
+          </div>
+
+          {/* Route options — below search */}
+          {destination && coords && (
+            <div className="absolute top-16 left-4 right-4 z-10">
+              <RoutePanel
+                userCoords={coords}
+                destination={destination}
+                onSelectRoute={(r) => setActiveRoute(r)}
+                onCancel={handleClearDestination}
+                activeRoute={activeRoute}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {/* ETA panel — bottom left, always visible */}
       <div className="absolute bottom-6 left-4 z-10">
         <EtaPanel coords={coords} onStopPin={setStopPin} />
       </div>
-
-      {/* Turn-by-turn card — top right, only while navigating */}
-      {activeRoute && (
-        <div className="absolute top-4 right-4 z-10">
-          <TurnPanel route={activeRoute} coords={coords} />
-        </div>
-      )}
-
-      {/* Nav summary panel — right side middle, only while navigating */}
-      {activeRoute && (
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
-          <NavPanel route={activeRoute} coords={coords} />
-        </div>
-      )}
 
       {/* Clock — bottom center, hidden while navigating */}
       {!activeRoute && (
