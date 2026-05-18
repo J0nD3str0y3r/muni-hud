@@ -17,6 +17,10 @@ export type RouteStep = {
   instruction: string;
   distanceM: number;
   durationSec: number;
+  maneuverType: string;     // "turn" | "depart" | "arrive" | "continue" | "roundabout" etc.
+  maneuverModifier: string; // "left" | "right" | "straight" | "slight left" etc.
+  streetName: string;       // name of street to turn onto
+  location: [number, number]; // [lng, lat] of the maneuver point
 };
 
 export type RouteOption = {
@@ -66,13 +70,18 @@ export async function GET(req: NextRequest) {
     const geometry: [number, number][] = route.geometry.coordinates;
 
     const steps: RouteStep[] = (route.legs?.[0]?.steps ?? []).map((s: {
-      maneuver: { instruction: string };
+      maneuver: { instruction: string; type: string; modifier?: string; location: [number, number] };
+      name: string;
       distance: number;
       duration: number;
     }) => ({
       instruction: s.maneuver.instruction,
       distanceM: Math.round(s.distance),
       durationSec: Math.round(s.duration),
+      maneuverType: s.maneuver.type ?? "continue",
+      maneuverModifier: s.maneuver.modifier ?? "straight",
+      streetName: s.name ?? "",
+      location: s.maneuver.location,
     }));
 
     routes.push({
