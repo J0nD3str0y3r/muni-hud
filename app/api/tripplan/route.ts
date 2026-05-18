@@ -186,118 +186,174 @@ async function fetchMapboxRoute(
 
 // ─── Transit option builder ───────────────────────────────────────────────────
 
+async function fetchAllBartStops(): Promise<Stop[]> {
+  const res = await fetch(
+    `https://api.511.org/transit/stops?api_key=${SF511_KEY}&operator_id=BA&format=json`,
+    { next: { revalidate: 3600 } }
+  );
+  if (!res.ok) return [];
+  const data = JSON.parse(strip(await res.text()));
+  type R = { id: unknown; Name: unknown; Location?: { Latitude?: unknown; Longitude?: unknown } };
+  return (data?.Contents?.dataObjects?.ScheduledStopPoint ?? []).map((s: R) => ({
+    id: String(s.id),
+    name: String(s.Name),
+    lat: Number(s.Location?.Latitude),
+    lng: Number(s.Location?.Longitude),
+  })).filter((s: Stop) => s.lat && s.lng);
+}
+
+async function fetchBartArrivalsAt(stopId: string, stopName: string): Promise<Arrival[]> {
+  const res = await fetch(
+    `https://api.511.org/transit/StopMonitoring?api_key=${SF511_KEY}&agency=BA&stopCode=${stopId}&format=json`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) return [];
+  const data = JSON.parse(strip(await res.text()));
+  const visits = data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
+
+  return visits.flatMap((v: Record<string, unknown>) => {
+    const j = v.MonitoredVehicleJourney as Record<string, unknown> | undefined;
+    const call = (j?.MonitoredCall) as Record<string, unknown> | undefined;
+    const line = String(j?.LineRef ?? "?").trim();
+    if (line === "?") return [];
+    const headsign = String(j?.DestinationName ?? j?.DirectionRef ?? "").trim();
+    const timeStr = String(call?.ExpectedArrivalTime ?? call?.AimedArrivalTime ?? "");
+    if (!timeStr) return [];
+    const eta = new Date(timeStr).getTime();
+    if (isNaN(eta)) return [];
+    const minutes = Math.max(0, Math.round((eta - Date.now()) / 60_000));
+    return [{ line, headsign, minutes, stopName }];
+  });
+}
+
 async function buildTransitOptions(
   olat: number, olng: number,
   dlat: number, dlng: number
 ): Promise<RouteOption[]> {
-  const WALK_SPEED = 1.4;  // m/s (~3 mph)
-  const TRANSIT_SPEED = 6; // m/s (~13 mph urban with stops)
+  const WALK_SPEED = 1.4;   // m/s (~3 mph)
+  const MUNI_SPEED = 6;     // m/s (~13 mph)
+  const BART_SPEED = 15;    // m/s (~34 mph)
 
-  const allStops = await fetchAllStops();
-  if (allStops.length === 0) return [];
+  const [allStops, allBartStops] = await Promise.all([
+    fetchAllStops(),
+    fetchAllBartStops(),
+  ]);
+  if (allStops.length === 0 && allBartStops.length === 0) return [];
 
-  // Nearest stop to user and destination
-  const byUserDist = [...allStops].sort(
-    (a, b) => haversineM(olat, olng, a.lat, a.lng) - haversineM(olat, olng, b.lat, b.lng)
-  );
-  const originStop = byUserDist[0];
-  const destStops = [...allStops].sort(
-    (a, b) => haversineM(dlat, dlng, a.lat, a.lng) - haversineM(dlat, dlng, b.lat, b.lng)
-  ).slice(0, 8);
-  const destStopById = new Map(destStops.map(s => [s.id, s]));
+  type AgencyConfig = {
+    stops: Stop[];
+    destStops: Stop[];
+    originStop: Stop;
+    speed: number;
+    agencyCode: "SF" | "BA";
+    idPrefix: string;
+  };
 
-  // Arrivals at origin stop
-  const arrivals = await fetchArrivalsAt(originStop.id, originStop.name);
-  if (arrivals.length === 0) return [];
+  const configs: AgencyConfig[] = [];
 
-  // De-duplicate by line (keep earliest arrival per line)
-  const byLine = new Map<string, Arrival>();
-  for (const a of arrivals) {
-    if (!byLine.has(a.line)) byLine.set(a.line, a);
+  if (allStops.length > 0) {
+    const originStop = [...allStops].sort(
+      (a, b) => haversineM(olat, olng, a.lat, a.lng) - haversineM(olat, olng, b.lat, b.lng)
+    )[0];
+    const destStops = [...allStops].sort(
+      (a, b) => haversineM(dlat, dlng, a.lat, a.lng) - haversineM(dlat, dlng, b.lat, b.lng)
+    ).slice(0, 8);
+    configs.push({ stops: allStops, destStops, originStop, speed: MUNI_SPEED, agencyCode: "SF", idPrefix: "muni" });
+  }
+
+  if (allBartStops.length > 0) {
+    const originStop = [...allBartStops].sort(
+      (a, b) => haversineM(olat, olng, a.lat, a.lng) - haversineM(olat, olng, b.lat, b.lng)
+    )[0];
+    const destStops = [...allBartStops].sort(
+      (a, b) => haversineM(dlat, dlng, a.lat, a.lng) - haversineM(dlat, dlng, b.lat, b.lng)
+    ).slice(0, 5);
+    configs.push({ stops: allBartStops, destStops, originStop, speed: BART_SPEED, agencyCode: "BA", idPrefix: "bart" });
   }
 
   const now = Date.now();
   const options: RouteOption[] = [];
 
-  await Promise.all(Array.from(byLine.values()).map(async (arrival) => {
-    // Walk to origin stop
-    const walkToBoardM = haversineM(olat, olng, originStop.lat, originStop.lng);
-    const walkToBoardSec = walkToBoardM / WALK_SPEED;
+  await Promise.all(configs.map(async ({ destStops, originStop, speed, agencyCode, idPrefix }) => {
+    const fetchFn = agencyCode === "BA" ? fetchBartArrivalsAt : fetchArrivalsAt;
+    const arrivals = await fetchFn(originStop.id, originStop.name);
+    if (arrivals.length === 0) return;
 
-    // Try to find a destination stop served by this line
-    let alightStop: Stop | null = null;
-
-    const lineStops = await fetchLineStops(arrival.line);
-    if (lineStops.length > 0) {
-      // Find which dest stop appears in this line's pattern
-      for (const ds of destStops) {
-        if (lineStops.some(ls => ls.id === ds.id)) {
-          alightStop = ds;
-          break;
-        }
-      }
+    const byLine = new Map<string, Arrival>();
+    for (const a of arrivals) {
+      if (!byLine.has(a.line)) byLine.set(a.line, a);
     }
 
-    // Fallback: use nearest dest stop (assume line passes nearby)
-    if (!alightStop) alightStop = destStops[0];
-    if (!alightStop) return;
+    await Promise.all(Array.from(byLine.values()).map(async (arrival) => {
+      const walkToBoardM = haversineM(olat, olng, originStop.lat, originStop.lng);
+      const walkToBoardSec = walkToBoardM / WALK_SPEED;
 
-    const transitM = haversineM(originStop.lat, originStop.lng, alightStop.lat, alightStop.lng);
-    const transitSec = transitM / TRANSIT_SPEED;
-    const waitSec = arrival.minutes * 60;
+      let alightStop: Stop | null = null;
+      if (agencyCode === "SF") {
+        const lineStops = await fetchLineStops(arrival.line);
+        if (lineStops.length > 0) {
+          for (const ds of destStops) {
+            if (lineStops.some(ls => ls.id === ds.id)) { alightStop = ds; break; }
+          }
+        }
+      }
+      if (!alightStop) alightStop = destStops[0];
+      if (!alightStop) return;
 
-    const walkFromAlightM = haversineM(alightStop.lat, alightStop.lng, dlat, dlng);
-    const walkFromAlightSec = walkFromAlightM / WALK_SPEED;
+      const transitM = haversineM(originStop.lat, originStop.lng, alightStop.lat, alightStop.lng);
+      const transitSec = transitM / speed;
+      const waitSec = arrival.minutes * 60;
+      const walkFromAlightM = haversineM(alightStop.lat, alightStop.lng, dlat, dlng);
+      const walkFromAlightSec = walkFromAlightM / WALK_SPEED;
+      const totalSec = walkToBoardSec + waitSec + transitSec + walkFromAlightSec;
 
-    const totalSec = walkToBoardSec + waitSec + transitSec + walkFromAlightSec;
+      if (transitM < walkToBoardM * 0.5) return;
 
-    // Discard options that don't actually make sense (e.g. transit goes wrong direction)
-    if (transitM < walkToBoardM * 0.5) return; // transit leg shorter than walk — skip
-
-    options.push({
-      id: `transit-${arrival.line}`,
-      profile: "transit",
-      totalDurationSec: Math.round(totalSec),
-      totalDistanceM: Math.round(walkToBoardM + transitM + walkFromAlightM),
-      departureTime: now,
-      arrivalTime: now + totalSec * 1000,
-      legs: [
-        {
-          mode: "WALK",
-          durationSec: Math.round(walkToBoardSec),
-          distanceM: Math.round(walkToBoardM),
-          departureTime: now,
-          geometry: [[olng, olat], [originStop.lng, originStop.lat]],
-          steps: [],
-        },
-        {
-          mode: "TRANSIT",
-          durationSec: Math.round(transitSec),
-          distanceM: Math.round(transitM),
-          departureTime: now + walkToBoardSec * 1000,
-          geometry: [[originStop.lng, originStop.lat], [alightStop.lng, alightStop.lat]],
-          steps: [],
-          line: arrival.line,
-          headsign: arrival.headsign,
-          boardStopName: originStop.name,
-          alightStopName: alightStop.name,
-          waitSec,
-        },
-        {
-          mode: "WALK",
-          durationSec: Math.round(walkFromAlightSec),
-          distanceM: Math.round(walkFromAlightM),
-          departureTime: now + (walkToBoardSec + waitSec + transitSec) * 1000,
-          geometry: [[alightStop.lng, alightStop.lat], [dlng, dlat]],
-          steps: [],
-        },
-      ],
-    });
+      options.push({
+        id: `${idPrefix}-${arrival.line}`,
+        profile: "transit",
+        totalDurationSec: Math.round(totalSec),
+        totalDistanceM: Math.round(walkToBoardM + transitM + walkFromAlightM),
+        departureTime: now,
+        arrivalTime: now + totalSec * 1000,
+        legs: [
+          {
+            mode: "WALK",
+            durationSec: Math.round(walkToBoardSec),
+            distanceM: Math.round(walkToBoardM),
+            departureTime: now,
+            geometry: [[olng, olat], [originStop.lng, originStop.lat]],
+            steps: [],
+          },
+          {
+            mode: "TRANSIT",
+            durationSec: Math.round(transitSec),
+            distanceM: Math.round(transitM),
+            departureTime: now + walkToBoardSec * 1000,
+            geometry: [[originStop.lng, originStop.lat], [alightStop.lng, alightStop.lat]],
+            steps: [],
+            line: arrival.line,
+            headsign: arrival.headsign,
+            boardStopName: originStop.name,
+            alightStopName: alightStop.name,
+            waitSec,
+          },
+          {
+            mode: "WALK",
+            durationSec: Math.round(walkFromAlightSec),
+            distanceM: Math.round(walkFromAlightM),
+            departureTime: now + (walkToBoardSec + waitSec + transitSec) * 1000,
+            geometry: [[alightStop.lng, alightStop.lat], [dlng, dlat]],
+            steps: [],
+          },
+        ],
+      });
+    }));
   }));
 
   return options
     .sort((a, b) => a.totalDurationSec - b.totalDurationSec)
-    .slice(0, 4);
+    .slice(0, 5);
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────

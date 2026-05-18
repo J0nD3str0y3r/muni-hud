@@ -28,10 +28,18 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function routeLabel(line: string): string {
+const BART_LINES: Record<string, string> = {
+  ANTC: "Antioch", BERY: "Berryessa", DALY: "Daly City",
+  DUBL: "Dublin", MLBR: "Millbrae", NCON: "N Concord",
+  RICH: "Richmond", SFIA: "SFO", WARM: "Warm Springs",
+  RED: "Red Line", ORANGE: "Orange Line", YELLOW: "Yellow Line",
+  GREEN: "Green Line", BLUE: "Blue Line",
+};
+
+function routeLabel(line: string, agency?: "MUNI" | "BART"): string {
+  if (agency === "BART") return BART_LINES[line.toUpperCase()] ?? `BART ${line}`;
   if (/R$/i.test(line)) return `${line} Rapid`;
   if (/X$/i.test(line)) return `${line} Express`;
-  // Single-letter Muni Metro lines
   if (/^[JKLMNT]$/i.test(line)) return `${line} Metro`;
   return `${line} Local`;
 }
@@ -57,7 +65,9 @@ function arrivalLabel(minutes: number, rec: Recommendation): string {
   return "Arrives in";
 }
 
-const MUNI_FARE = "$2.85 · MUNI";
+function fareLabel(agency: "MUNI" | "BART"): string {
+  return agency === "BART" ? "$2.65+ · BART" : "$2.85 · MUNI";
+}
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -102,7 +112,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
   if (!destination) {
     if (!primary) return null;
 
-    const label = routeLabel(primary.line);
+    const label = routeLabel(primary.line, primary.agency);
     const headsign = cleanHeadsign(primary.headsign);
 
     return (
@@ -134,7 +144,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
                 {sec.line}
               </span>
               <span className="text-white/30 text-[10px] truncate">
-                {routeLabel(sec.line)}{secHeadsign ? ` → ${secHeadsign}` : ""} · {sec.minutes}m
+                {routeLabel(sec.line, sec.agency)}{secHeadsign ? ` → ${secHeadsign}` : ""} · {sec.minutes}m
               </span>
             </div>
           );
@@ -173,7 +183,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
   const timeSavedMin = timeSavedSec / 60;
 
   const rec = classify(timeSavedMin);
-  const label = routeLabel(primary.line);
+  const label = routeLabel(primary.line, primary.agency);
   const headsign = cleanHeadsign(primary.headsign);
   const arrLabel = arrivalLabel(primary.minutes, rec);
   const destName = destination.name.split(",")[0];
@@ -239,7 +249,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
 
           {/* Fare + stop */}
           <div className="border-t border-white/10 pt-2 space-y-0.5">
-            <div className="text-white/40 text-[10px]">{MUNI_FARE}</div>
+            <div className="text-white/40 text-[10px]">{fareLabel(primary.agency)}</div>
             <div className="text-white/30 text-[10px] truncate">{primary.stopName}</div>
           </div>
 
@@ -255,7 +265,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
                   {secondary.line}
                 </span>
                 <span className="truncate">
-                  Also: {routeLabel(secondary.line)}{secHeadsign ? ` · ${secondary.minutes}m` : ` · ${secondary.minutes}m`}
+                  Also: {routeLabel(secondary.line, secondary.agency)} · {secondary.minutes}m
                 </span>
               </div>
             );

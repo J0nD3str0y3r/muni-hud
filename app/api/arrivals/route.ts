@@ -11,6 +11,7 @@ export type Arrival = {
   stopId: string;
   stopLat: number;
   stopLng: number;
+  agency: "MUNI" | "BART";
 };
 
 function distance(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -25,13 +26,16 @@ function distance(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-async function fetchNearestStop(lat: number, lng: number): Promise<Stop | null> {
-  const url = `https://api.511.org/transit/stops?api_key=${SF511_KEY}&operator_id=SF&format=json`;
+function strip(text: string) {
+  return text.replace(/^﻿/, "").trim();
+}
+
+async function fetchNearestStop(lat: number, lng: number, operatorId: string): Promise<Stop | null> {
+  const url = `https://api.511.org/transit/stops?api_key=${SF511_KEY}&operator_id=${operatorId}&format=json`;
   const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) return null;
 
-  const raw = await res.text();
-  const data = JSON.parse(raw.replace(/^﻿/, ""));
+  const data = JSON.parse(strip(await res.text()));
   type RawStop = { id: unknown; Name: unknown; Location?: { Latitude?: unknown; Longitude?: unknown } };
   const stops: Stop[] = (data?.Contents?.dataObjects?.ScheduledStopPoint ?? []).map(
     (s: RawStop) => ({
@@ -47,14 +51,14 @@ async function fetchNearestStop(lat: number, lng: number): Promise<Stop | null> 
     .sort((a, b) => distance(lat, lng, a.lat, a.lon) - distance(lat, lng, b.lat, b.lon))[0] ?? null;
 }
 
-async function fetchArrivals(stop: Stop): Promise<Arrival[]> {
+async function fetchArrivals(stop: Stop, agency: "MUNI" | "BART"): Promise<Arrival[]> {
+  const agencyCode = agency === "BART" ? "BA" : "SF";
   const url =
-    `https://api.511.org/transit/StopMonitoring?api_key=${SF511_KEY}&agency=SF&stopCode=${stop.id}&format=json`;
+    `https://api.511.org/transit/StopMonitoring?api_key=${SF511_KEY}&agency=${agencyCode}&stopCode=${stop.id}&format=json`;
   const res = await fetch(url, { next: { revalidate: 0 } });
   if (!res.ok) return [];
 
-  const raw = await res.text();
-  const data = JSON.parse(raw.replace(/^﻿/, ""));
+  const data = JSON.parse(strip(await res.text()));
   const visits: Record<string, unknown>[] =
     data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
 
@@ -64,12 +68,9 @@ async function fetchArrivals(stop: Stop): Promise<Arrival[]> {
       const journey = v.MonitoredVehicleJourney as Record<string, unknown> | undefined;
       const call = (journey?.MonitoredCall) as Record<string, unknown> | undefined;
 
-      // LineRef is the route short name (9R, 38, N, etc.)
-      // PublishedLineName is often the direction/destination — don't use it for line
       const line = String(journey?.LineRef ?? journey?.PublishedLineName ?? "?").trim();
       if (line === "?") return [];
 
-      // Headsign: DestinationName is where the vehicle is headed
       const headsign = String(
         journey?.DestinationName ??
         call?.DestinationDisplay ??
@@ -77,7 +78,6 @@ async function fetchArrivals(stop: Stop): Promise<Arrival[]> {
         ""
       ).trim();
 
-      // Prefer ExpectedArrivalTime for real-time, fall back to Aimed
       const timeStr = String(
         call?.ExpectedArrivalTime ??
         call?.AimedArrivalTime ??
@@ -97,6 +97,7 @@ async function fetchArrivals(stop: Stop): Promise<Arrival[]> {
         stopId: stop.id,
         stopLat: stop.lat,
         stopLng: stop.lon,
+        agency,
       }];
     });
 }
@@ -110,9 +111,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "bad coords" }, { status: 400 });
   }
 
-  const stop = await fetchNearestStop(lat, lng);
-  if (!stop) return NextResponse.json([]);
+  // Fetch nearest MUNI stop and nearest BART station in parallel
+  const [muniStop, bartStop] = await Promise.all([
+    fetchNearestStop(lat, lng, "SF"),
+    fetchNearestStop(lat, lng, "BA"),
+  ]);
 
-  const arrivals = await fetchArrivals(stop);
-  return NextResponse.json(arrivals);
+  const [muniArrivals, bartArrivals] = await Promise.all([
+    muniStop ? fetchArrivals(muniStop, "MUNI") : Promise.resolve([]),
+    bartStop ? fetchArrivals(bartStop, "BART") : Promise.resolve([]),
+  ]);
+
+  // Sort combined by minutes, BART first when tied (it's faster)
+  const all = [...muniArrivals, ...bartArrivals].sort((a, b) => {
+    if (a.minutes !== b.minutes) return a.minutes - b.minutes;
+    return a.agency === "BART" ? -1 : 1;
+  });
+
+  return NextResponse.json(all);
 }
