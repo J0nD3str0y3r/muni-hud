@@ -2,7 +2,7 @@
 
 import type { RouteOption } from "@/app/api/tripplan/route";
 import type { Coords } from "@/app/page";
-import { lineColor } from "@/lib/lineColor";
+import { lineColor, lineTextColor } from "@/lib/lineColor";
 
 type Props = {
   route: RouteOption;
@@ -52,7 +52,10 @@ export default function TransitCard({ route, coords, destinationName }: Props) {
       <div className="flex items-center gap-2">
         <span
           className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
-          style={{ background: lineColor(transitLeg.line ?? ""), color: "#000" }}
+          style={{
+            background: lineColor(transitLeg.line ?? ""),
+            color: lineTextColor(transitLeg.line ?? ""),
+          }}
         >
           {transitLeg.line}
         </span>
@@ -64,12 +67,19 @@ export default function TransitCard({ route, coords, destinationName }: Props) {
         )}
       </div>
 
-      {/* Walk to stop or already there */}
+      {/* Board stop */}
       <div className="text-white/60 text-xs">
         {alreadyAtStop
           ? `At ${transitLeg.boardStopName}`
           : `${formatMins(remainingWalkSec)} walk · ${transitLeg.boardStopName}`}
       </div>
+
+      {/* Alight stop */}
+      {transitLeg.alightStopName && (
+        <div className="text-white/40 text-[10px]">
+          Get off at {transitLeg.alightStopName}
+        </div>
+      )}
 
       {/* Destination + arrival */}
       <div className="border-t border-white/10 pt-2 flex items-center justify-between">

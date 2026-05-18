@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Coords } from "@/app/page";
 import type { Destination } from "@/components/SearchBar";
 import type { Arrival } from "@/app/api/arrivals/route";
-import { lineColor } from "@/lib/lineColor";
+import { lineColor, lineTextColor } from "@/lib/lineColor";
 
 export type StopPin = { lat: number; lng: number; name: string; lines: string[] };
 
@@ -41,6 +41,7 @@ function routeLabel(line: string, agency?: "MUNI" | "BART"): string {
   if (/R$/i.test(line)) return `${line} Rapid`;
   if (/X$/i.test(line)) return `${line} Express`;
   if (/^[JKLMNT]$/i.test(line)) return `${line} Metro`;
+  if (/^[EF]$/i.test(line)) return `${line} Streetcar`;
   return `${line} Local`;
 }
 
@@ -120,7 +121,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
         <div className="flex items-center gap-2 mb-1">
           <span
             className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
-            style={{ background: lineColor(primary.line), color: "#000" }}
+            style={{ background: lineColor(primary.line), color: lineTextColor(primary.line) }}
           >
             {primary.line}
           </span>
@@ -139,7 +140,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
             <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-2">
               <span
                 className="text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"
-                style={{ background: lineColor(sec.line), color: "#000" }}
+                style={{ background: lineColor(sec.line), color: lineTextColor(sec.line) }}
               >
                 {sec.line}
               </span>
@@ -228,7 +229,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
           <div className="flex items-center gap-2">
             <span
               className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
-              style={{ background: lineColor(primary.line), color: "#000" }}
+              style={{ background: lineColor(primary.line), color: lineTextColor(primary.line) }}
             >
               {primary.line}
             </span>
@@ -260,7 +261,7 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
               <div className="border-t border-white/5 pt-1.5 text-white/30 text-[10px] flex items-center gap-1.5">
                 <span
                   className="text-[9px] font-black px-1 py-0.5 rounded shrink-0"
-                  style={{ background: lineColor(secondary.line), color: "#000" }}
+                  style={{ background: lineColor(secondary.line), color: lineTextColor(secondary.line) }}
                 >
                   {secondary.line}
                 </span>
