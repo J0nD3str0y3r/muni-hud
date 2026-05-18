@@ -37,13 +37,8 @@ export default function Home() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  // On desktop browsers location prompt fires fine without a gesture — start automatically.
-  // On mobile we still attempt it; the tap-to-start screen is the fallback if it stays "idle".
-  useEffect(() => {
-    const cleanup = startTracking();
-    return cleanup;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Intentionally no auto-start — always require a tap so the browser
+  // receives a user gesture before the permission prompt fires on mobile.
 
   if (locState === "idle" || locState === "waiting") {
     return (
@@ -66,10 +61,14 @@ export default function Home() {
 
   if (locState === "denied") {
     return (
-      <main className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 px-8 text-center">
+      <main
+        className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 px-8 text-center cursor-pointer"
+        onClick={startTracking}
+      >
         <div className="text-white/60 text-sm">Location access denied</div>
         <p className="text-white/30 text-xs max-w-xs">
-          Open your browser settings, allow location for this site, then reload.
+          Your browser blocked location. In your browser settings, find this
+          site and set Location to <strong className="text-white/50">Allow</strong>, then tap here to retry.
         </p>
       </main>
     );
