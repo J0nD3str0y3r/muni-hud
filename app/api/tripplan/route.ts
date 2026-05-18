@@ -29,7 +29,9 @@ export type RouteOption = {
   legs: RouteLeg[];
 };
 
-const MAPBOX_TOKEN = process.env.MAPBOX_SERVER_TOKEN ?? process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+// MAPBOX_SECRET_TOKEN is a sk. token with DIRECTIONS:READ scope (server-side only)
+// Falls back to the public token during local dev if you haven't set up the secret yet
+const MAPBOX_TOKEN = process.env.MAPBOX_SECRET_TOKEN ?? process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
 export async function GET(req: NextRequest) {
   if (!MAPBOX_TOKEN) {
