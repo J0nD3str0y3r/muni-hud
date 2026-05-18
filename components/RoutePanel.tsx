@@ -48,23 +48,25 @@ export default function RoutePanel({
 }: Props) {
   const [options, setOptions] = useState<RouteOption[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    setError(false);
+    setError(null);
     setOptions(null);
 
     fetch(
       `/api/tripplan?olat=${userCoords.lat}&olng=${userCoords.lng}` +
       `&dlat=${destination.lat}&dlng=${destination.lng}`
     )
-      .then((r) => r.json())
-      .then((data: RouteOption[]) => {
-        if (!Array.isArray(data) || data.length === 0) throw new Error();
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error ?? `HTTP ${r.status}`);
+        if (!Array.isArray(data) || data.length === 0)
+          throw new Error(data?.detail ?? "No routes found");
         setOptions(data);
       })
-      .catch(() => setError(true))
+      .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destination.lat, destination.lng]);
@@ -119,8 +121,9 @@ export default function RoutePanel({
       )}
 
       {error && (
-        <div className="px-4 py-4 text-white/40 text-xs">
-          Couldn't load routes. Check your 511 API key or try again.
+        <div className="px-4 py-4 text-white/40 text-xs space-y-1">
+          <div>Couldn't load routes.</div>
+          <div className="text-white/25 break-all">{error}</div>
         </div>
       )}
 
