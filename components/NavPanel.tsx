@@ -1,11 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import type { RouteOption } from "@/app/api/tripplan/route";
+import type { Coords } from "@/app/page";
 
 type Props = {
   route: RouteOption;
+  coords: Coords | null;
 };
+
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6_371_000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 function formatArrival(ms: number) {
   return new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -20,50 +34,60 @@ function formatMiles(meters: number) {
     : `${Math.round(miles)}mi`;
 }
 
-function minsRemaining(arrivalMs: number) {
-  return Math.max(0, Math.round((arrivalMs - Date.now()) / 60_000));
-}
+export default function NavPanel({ route, coords }: Props) {
+  // Destination = last coordinate of last leg
+  const dest = useMemo(() => {
+    const lastLeg = route.legs[route.legs.length - 1];
+    const geom = lastLeg?.geometry ?? [];
+    return geom[geom.length - 1] ?? null; // [lng, lat]
+  }, [route]);
 
-export default function NavPanel({ route }: Props) {
-  const [mins, setMins] = useState(() => minsRemaining(route.arrivalTime));
+  const { remainingM, remainingMins, arrivalMs } = useMemo(() => {
+    if (!dest || !coords) {
+      // Fall back to original estimate
+      return {
+        remainingM: route.totalDistanceM,
+        remainingMins: Math.round(route.totalDurationSec / 60),
+        arrivalMs: route.arrivalTime,
+      };
+    }
 
-  // Tick every 30s to keep minutes fresh
-  useEffect(() => {
-    setMins(minsRemaining(route.arrivalTime));
-    const id = setInterval(() => setMins(minsRemaining(route.arrivalTime)), 30_000);
-    return () => clearInterval(id);
-  }, [route.arrivalTime]);
+    const remainingM = haversineM(coords.lat, coords.lng, dest[1], dest[0]);
 
-  const distanceM = route.totalDistanceM;
+    // Pace from original route (sec/m), clamped so it doesn't explode near destination
+    const paceSecPerM = route.totalDurationSec / Math.max(route.totalDistanceM, 1);
+    const remainingSec = remainingM * paceSecPerM;
+    const remainingMins = Math.max(0, Math.round(remainingSec / 60));
+    const arrivalMs = Date.now() + remainingSec * 1000;
+
+    return { remainingM, remainingMins, arrivalMs };
+  }, [coords, dest, route]);
 
   return (
     <div className="flex flex-col gap-1 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl px-4 py-4 items-center min-w-[80px]">
-      {/* Arrival time */}
       <div className="text-center">
         <div className="text-white/30 text-[9px] uppercase tracking-widest mb-0.5">Arrive</div>
         <div className="text-white text-sm font-semibold tabular-nums">
-          {formatArrival(route.arrivalTime)}
+          {formatArrival(arrivalMs)}
         </div>
       </div>
 
       <div className="w-full h-px bg-white/10 my-1" />
 
-      {/* Minutes remaining */}
       <div className="text-center">
         <div className="text-white/30 text-[9px] uppercase tracking-widest mb-0.5">Left</div>
         <div className="text-white text-2xl font-bold tabular-nums leading-none">
-          {mins}
+          {remainingMins}
         </div>
         <div className="text-white/30 text-[9px] mt-0.5">min</div>
       </div>
 
       <div className="w-full h-px bg-white/10 my-1" />
 
-      {/* Distance remaining */}
       <div className="text-center">
         <div className="text-white/30 text-[9px] uppercase tracking-widest mb-0.5">Dist</div>
         <div className="text-white text-sm font-semibold tabular-nums">
-          {formatMiles(distanceM)}
+          {formatMiles(remainingM)}
         </div>
       </div>
     </div>

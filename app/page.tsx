@@ -138,7 +138,7 @@ export default function Home() {
       {/* Nav panel — right side, only while navigating */}
       {activeRoute && (
         <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
-          <NavPanel route={activeRoute} />
+          <NavPanel route={activeRoute} coords={coords} />
         </div>
       )}
 
