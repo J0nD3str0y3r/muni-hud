@@ -22,11 +22,34 @@ function distM(lat1: number, lng1: number, lat2: number, lng2: number) {
 }
 
 function formatDist(m: number) {
-  if (m < 100) return `${Math.round(m)} m`;
-  if (m < 1609) return `${Math.round(m / 50) * 50} m`;
-  return `${(m / 1609.34).toFixed(1)} mi`;
+  if (m < 100) return `${Math.round(m)}m`;
+  if (m < 1609) return `${Math.round(m / 25) * 25}m`;
+  return `${(m / 1609.34).toFixed(1)}mi`;
 }
 
+// Human action word from maneuver type + modifier
+function actionWord(type: string, modifier: string): string {
+  if (type === "arrive") return "Arrive";
+  if (type === "depart") return "Head out";
+  if (type === "roundabout" || type === "rotary") return "Enter roundabout";
+  if (type === "merge") return modifier.includes("left") ? "Merge left" : "Merge right";
+  if (type === "fork") return modifier.includes("left") ? "Keep left" : "Keep right";
+  if (type === "off ramp") return modifier.includes("left") ? "Exit left" : "Exit right";
+  if (type === "end of road") return modifier.includes("left") ? "Turn left" : "Turn right";
+
+  switch (modifier) {
+    case "left":        return "Left";
+    case "right":       return "Right";
+    case "slight left": return "Bear left";
+    case "slight right":return "Bear right";
+    case "sharp left":  return "Sharp left";
+    case "sharp right": return "Sharp right";
+    case "uturn":       return "U-turn";
+    default:            return "Straight";
+  }
+}
+
+// SVG arrow rotated by maneuver modifier
 const MODIFIER_ANGLE: Record<string, number> = {
   straight: 0,
   "slight right": 30,
@@ -38,10 +61,10 @@ const MODIFIER_ANGLE: Record<string, number> = {
   "slight left": -30,
 };
 
-function ArrowIcon({ type, modifier }: { type: string; modifier: string }) {
+function ManeuverArrow({ type, modifier }: { type: string; modifier: string }) {
   if (type === "arrive") {
     return (
-      <svg viewBox="0 0 24 24" className="w-16 h-16 text-white" fill="currentColor">
+      <svg viewBox="0 0 24 24" className="w-14 h-14 text-white" fill="currentColor">
         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
       </svg>
     );
@@ -50,7 +73,30 @@ function ArrowIcon({ type, modifier }: { type: string; modifier: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="w-16 h-16 text-white"
+      className="w-14 h-14 text-white"
+      fill="currentColor"
+      style={{ transform: `rotate(${angle}deg)`, transition: "transform 0.4s ease" }}
+    >
+      <path d="M12 2l-5 7.5h3V19h4V9.5h3L12 2z" />
+    </svg>
+  );
+}
+
+function getBearing(fromLat: number, fromLng: number, toLat: number, toLng: number) {
+  const φ1 = (fromLat * Math.PI) / 180;
+  const φ2 = (toLat * Math.PI) / 180;
+  const Δλ = ((toLng - fromLng) * Math.PI) / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function BearingArrow({ bearing, heading }: { bearing: number; heading: number | null }) {
+  const angle = heading !== null ? (bearing - heading + 360) % 360 : bearing;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-14 h-14 text-white"
       fill="currentColor"
       style={{ transform: `rotate(${angle}deg)`, transition: "transform 0.4s ease" }}
     >
@@ -84,25 +130,35 @@ export default function TurnPanel({ route, coords }: Props) {
 
   useEffect(() => {
     if (!coords) return;
-
     if (prevCoordsRef.current) {
-      const d = distM(
+      distTraveledRef.current += distM(
         prevCoordsRef.current.lat, prevCoordsRef.current.lng,
         coords.lat, coords.lng
       );
-      distTraveledRef.current += d;
     }
     prevCoordsRef.current = coords;
 
-    const traveled = distTraveledRef.current;
-    const next = cumDist.findIndex((end) => end > traveled);
+    const next = cumDist.findIndex((end) => end > distTraveledRef.current);
     const newIdx = next >= 0 ? next : steps.length - 1;
-
     if (newIdx !== stepIdxRef.current) {
       stepIdxRef.current = newIdx;
       setStepIdx(newIdx);
     }
   }, [coords]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Transit routes have no steps — bearing arrow to destination
+  if (steps.length === 0) {
+    const destCoord = route.legs[route.legs.length - 1]?.geometry.at(-1);
+    if (!destCoord || !coords) return null;
+    const bearing = getBearing(coords.lat, coords.lng, destCoord[1], destCoord[0]);
+    const dist = distM(coords.lat, coords.lng, destCoord[1], destCoord[0]);
+    return (
+      <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-5 py-4 flex flex-col items-center gap-2 w-40 shadow-2xl">
+        <BearingArrow bearing={bearing} heading={coords.heading} />
+        <div className="text-white text-xl font-bold tabular-nums">{formatDist(dist)}</div>
+      </div>
+    );
+  }
 
   const rawStep = steps[stepIdx];
   if (!rawStep) return null;
@@ -112,30 +168,38 @@ export default function TurnPanel({ route, coords }: Props) {
     : rawStep;
 
   const isArrive = step.maneuverType === "arrive";
+  const action = actionWord(step.maneuverType, step.maneuverModifier);
 
   const distToStep = coords && step.location
-    ? Math.round(distM(coords.lat, coords.lng, step.location[1], step.location[0]))
+    ? distM(coords.lat, coords.lng, step.location[1], step.location[0])
     : null;
 
+  // Street name — strip "St", "Ave" etc only if very long; otherwise keep it
+  const street = step.streetName ?? "";
+
   return (
-    <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-5 py-4 flex flex-col items-center gap-3 w-36 shadow-2xl">
-      <ArrowIcon type={step.maneuverType} modifier={step.maneuverModifier} />
+    <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-5 py-4 flex flex-col items-center gap-2 w-40 shadow-2xl">
+      <ManeuverArrow type={step.maneuverType} modifier={step.maneuverModifier} />
 
-      {!isArrive && distToStep !== null && (
-        <div className="text-white text-2xl font-bold tabular-nums leading-none tracking-tight">
-          {formatDist(distToStep)}
-        </div>
+      {isArrive ? (
+        <div className="text-white text-base font-semibold text-center">You&apos;re here</div>
+      ) : (
+        <>
+          {/* Action + distance on one line */}
+          <div className="text-white text-base font-bold text-center leading-tight">
+            {distToStep !== null
+              ? `${action} in ${formatDist(distToStep)}`
+              : action}
+          </div>
+
+          {/* Street name */}
+          {street && (
+            <div className="text-white/60 text-xs text-center leading-snug font-medium tracking-wide">
+              {street}
+            </div>
+          )}
+        </>
       )}
-
-      <div className="text-white/70 text-xs text-center leading-snug">
-        {isArrive ? (
-          "You have arrived"
-        ) : step.streetName ? (
-          <>onto<br /><span className="text-white font-semibold">{step.streetName}</span></>
-        ) : (
-          step.instruction
-        )}
-      </div>
     </div>
   );
 }
