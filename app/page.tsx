@@ -251,14 +251,17 @@ export default function Home() {
             </div>
           )}
 
-          {/* Bottom right — transit info card + turn arrow stacked */}
-          <div className="absolute bottom-6 right-4 z-10 flex flex-col items-end gap-2">
-            <TransitCard
-              route={activeRoute}
-              coords={coords}
-              destinationName={destination?.name ?? ""}
-            />
-            <TurnPanel route={activeRoute} coords={coords} />
+          {/* Bottom right — transit info card OR turn arrow, never both */}
+          <div className="absolute bottom-6 right-4 z-10">
+            {activeRoute.profile === "transit" ? (
+              <TransitCard
+                route={activeRoute}
+                coords={coords}
+                destinationName={destination?.name ?? ""}
+              />
+            ) : (
+              <TurnPanel route={activeRoute} coords={coords} />
+            )}
           </div>
         </>
       ) : (
@@ -291,7 +294,7 @@ export default function Home() {
 
       {/* ETA panel — bottom left, always visible */}
       <div className="absolute bottom-6 left-4 z-10">
-        <EtaPanel coords={coords} onStopPin={setStopPin} />
+        <EtaPanel coords={coords} destination={destination} onStopPin={setStopPin} />
       </div>
 
       {/* Clock — bottom center, hidden while navigating */}
