@@ -109,8 +109,13 @@ export default function TurnPanel({ route, coords }: Props) {
     }
   }, [coords]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const step = steps[stepIdx];
-  if (!step) return null;
+  const rawStep = steps[stepIdx];
+  if (!rawStep) return null;
+
+  // Never show "depart" — display the next real turn instead
+  const step = rawStep.maneuverType === "depart" && steps[stepIdx + 1]
+    ? steps[stepIdx + 1]
+    : rawStep;
 
   const isArrive = step.maneuverType === "arrive";
 
