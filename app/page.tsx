@@ -236,7 +236,14 @@ export default function Home() {
 
           {/* Turn card — bottom right, prominent */}
           <div className="absolute bottom-6 right-4 z-10">
-            <TurnPanel route={activeRoute} coords={coords} />
+            <TurnPanel
+              route={activeRoute}
+              coords={coords}
+              destination={{
+                name: destination?.name ?? "",
+                arrivalTime: activeRoute.arrivalTime,
+              }}
+            />
           </div>
         </>
       ) : (
