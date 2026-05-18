@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import type { RouteOption, RouteStep } from "@/app/api/tripplan/route";
 import type { Coords } from "@/app/page";
 
@@ -8,8 +8,6 @@ type Props = {
   route: RouteOption;
   coords: Coords | null;
 };
-
-const ADVANCE_THRESHOLD_M = 25; // advance to next step when within 25m of maneuver point
 
 function distM(lat1: number, lng1: number, lat2: number, lng2: number) {
   const R = 6_371_000;
@@ -64,37 +62,50 @@ function ArrowIcon({ type, modifier }: { type: string; modifier: string }) {
 export default function TurnPanel({ route, coords }: Props) {
   const steps = route.legs.flatMap((l) => l.steps) as RouteStep[];
 
-  // Start at first non-depart step so we immediately show the first real turn
-  const firstRealIdx = steps.findIndex((s) => s.maneuverType !== "depart");
-  const startIdx = firstRealIdx >= 0 ? firstRealIdx : 0;
+  // Cumulative distance at the END of each step — tells us when to advance
+  const cumDist = useMemo(() => {
+    let total = 0;
+    return steps.map((s) => {
+      total += s.distanceM;
+      return total;
+    });
+  }, [steps]);
 
-  const [stepIdx, setStepIdx] = useState(startIdx);
-  const stepIdxRef = useRef(startIdx);
+  const [stepIdx, setStepIdx] = useState(0);
+  const stepIdxRef = useRef(0);
+  const prevCoordsRef = useRef<Coords | null>(null);
+  const distTraveledRef = useRef(0);
 
-  // Reset when route changes
+  // Reset everything when route changes
   useEffect(() => {
-    const idx = steps.findIndex((s) => s.maneuverType !== "depart");
-    const start = idx >= 0 ? idx : 0;
-    stepIdxRef.current = start;
-    setStepIdx(start);
+    stepIdxRef.current = 0;
+    setStepIdx(0);
+    prevCoordsRef.current = null;
+    distTraveledRef.current = 0;
   }, [route]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Advance step when user gets close to the current maneuver point
+  // Accumulate distance traveled and advance step index accordingly
   useEffect(() => {
-    if (!coords || steps.length === 0) return;
+    if (!coords) return;
 
-    const idx = stepIdxRef.current;
-    if (idx >= steps.length - 1) return; // already at last step
+    if (prevCoordsRef.current) {
+      const d = distM(
+        prevCoordsRef.current.lat, prevCoordsRef.current.lng,
+        coords.lat, coords.lng
+      );
+      distTraveledRef.current += d;
+    }
+    prevCoordsRef.current = coords;
 
-    const step = steps[idx];
-    if (!step?.location) return;
+    const traveled = distTraveledRef.current;
 
-    const d = distM(coords.lat, coords.lng, step.location[1], step.location[0]);
+    // Find the first step whose cumulative end-distance is still AHEAD of us
+    const next = cumDist.findIndex((end) => end > traveled);
+    const newIdx = next >= 0 ? next : steps.length - 1;
 
-    if (d <= ADVANCE_THRESHOLD_M) {
-      const next = idx + 1;
-      stepIdxRef.current = next;
-      setStepIdx(next);
+    if (newIdx !== stepIdxRef.current) {
+      stepIdxRef.current = newIdx;
+      setStepIdx(newIdx);
     }
   }, [coords]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -103,7 +114,7 @@ export default function TurnPanel({ route, coords }: Props) {
 
   const isArrive = step.maneuverType === "arrive";
 
-  // Distance to the current step's maneuver point
+  // Remaining distance to this step's maneuver point (for display)
   const distToStep = coords && step.location
     ? Math.round(distM(coords.lat, coords.lng, step.location[1], step.location[0]))
     : null;
