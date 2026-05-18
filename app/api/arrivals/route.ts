@@ -3,9 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 const SF511_KEY = process.env.SF_511_API_KEY!;
 
 type Stop = { id: string; name: string; lat: number; lon: number };
-type Prediction = { line: string; minutes: number; stopName: string };
+export type Arrival = {
+  line: string;
+  headsign: string;  // destination of the vehicle e.g. "Embarcadero"
+  minutes: number;
+  stopName: string;
+  stopId: string;
+};
 
-// Haversine distance in meters
 function distance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6_371_000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -19,8 +24,7 @@ function distance(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 async function fetchNearestStop(lat: number, lng: number): Promise<Stop | null> {
-  const url =
-    `https://api.511.org/transit/stops?api_key=${SF511_KEY}&operator_id=SF&format=json`;
+  const url = `https://api.511.org/transit/stops?api_key=${SF511_KEY}&operator_id=SF&format=json`;
   const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) return null;
 
@@ -40,32 +44,40 @@ async function fetchNearestStop(lat: number, lng: number): Promise<Stop | null> 
     .sort((a, b) => distance(lat, lng, a.lat, a.lon) - distance(lat, lng, b.lat, b.lon))[0] ?? null;
 }
 
-async function fetchArrivals(stopId: string, stopName: string): Promise<Prediction[]> {
+async function fetchArrivals(stop: Stop): Promise<Arrival[]> {
   const url =
-    `https://api.511.org/transit/StopMonitoring?api_key=${SF511_KEY}&agency=SF&stopCode=${stopId}&format=json`;
+    `https://api.511.org/transit/StopMonitoring?api_key=${SF511_KEY}&agency=SF&stopCode=${stop.id}&format=json`;
   const res = await fetch(url, { next: { revalidate: 0 } });
   if (!res.ok) return [];
 
   const data = await res.json();
-  const visits =
-    data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
+  const visits = data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
 
   return visits
     .slice(0, 5)
     .map((v: Record<string, unknown>) => {
       const journey = (v as { MonitoredVehicleJourney?: Record<string, unknown> })
-        .MonitoredVehicleJourney;
-      const call = (journey as { MonitoredCall?: Record<string, unknown> })?.MonitoredCall;
-      const aimed = String((call as { AimedArrivalTime?: unknown })?.AimedArrivalTime ?? "");
+        .MonitoredVehicleJourney as Record<string, unknown> | undefined;
+      const call = (journey as { MonitoredCall?: Record<string, unknown> } | undefined)
+        ?.MonitoredCall as Record<string, unknown> | undefined;
+
+      const aimed = String(call?.AimedArrivalTime ?? call?.ExpectedArrivalTime ?? "");
       const now = Date.now();
       const eta = new Date(aimed).getTime();
-      const minutes = Math.max(0, Math.round((eta - now) / 60_000));
-      const line = String(
-        (journey as { PublishedLineName?: unknown })?.PublishedLineName ?? "?"
+      const minutes = isNaN(eta) ? null : Math.max(0, Math.round((eta - now) / 60_000));
+
+      const line = String(journey?.PublishedLineName ?? "?");
+      // DestinationName or DirectionRef gives the headsign
+      const headsign = String(
+        journey?.DestinationName ??
+        journey?.DirectionRef ??
+        call?.DestinationDisplay ??
+        ""
       );
-      return { line, minutes, stopName };
+
+      return { line, headsign, minutes, stopName: stop.name, stopId: stop.id };
     })
-    .filter((p: Prediction) => p.line !== "?");
+    .filter((p: { line: string; minutes: number | null }) => p.line !== "?" && p.minutes !== null) as Arrival[];
 }
 
 export async function GET(req: NextRequest) {
@@ -80,6 +92,6 @@ export async function GET(req: NextRequest) {
   const stop = await fetchNearestStop(lat, lng);
   if (!stop) return NextResponse.json([]);
 
-  const arrivals = await fetchArrivals(stop.id, stop.name);
+  const arrivals = await fetchArrivals(stop);
   return NextResponse.json(arrivals);
 }

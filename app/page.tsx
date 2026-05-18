@@ -128,12 +128,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* ETA panel — bottom left, hidden while navigating */}
-      {!destination && (
-        <div className="absolute bottom-6 left-4 z-10">
-          <EtaPanel coords={coords} />
-        </div>
-      )}
+      {/* ETA panel — bottom left, always visible */}
+      <div className="absolute bottom-6 left-4 z-10">
+        <EtaPanel coords={coords} />
+      </div>
 
       {/* Clock — bottom center, hidden while navigating */}
       {!activeRoute && (
