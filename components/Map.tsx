@@ -63,9 +63,9 @@ export default function Map({
         id: TRANSIT_LAYER,
         type: "line",
         source: ROUTE_SOURCE,
-        filter: ["==", ["get", "mode"], "TRANSIT"],
+        filter: ["in", ["get", "mode"], ["literal", ["TRANSIT", "CYCLING"]]],
         paint: {
-          "line-color": "#4f9cff",
+          "line-color": ["match", ["get", "mode"], "CYCLING", "#a8ff78", "#4f9cff"],
           "line-opacity": 0.85,
           "line-width": 4,
         },

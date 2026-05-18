@@ -1,105 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
-import { decodePolyline } from "@/lib/polyline";
 
-const SF511_KEY = process.env.SF_511_API_KEY;
+// Uses Mapbox Directions API — same token already in use, no extra signup needed.
+// Profiles: walking | cycling | driving
+// Returns a single RouteOption with geometry ready to draw on the map.
 
 export type RouteLeg = {
-  mode: "WALK" | "TRANSIT";
-  line?: string;
-  lineName?: string;
+  mode: "WALK" | "CYCLING" | "TRANSIT";
   durationSec: number;
   distanceM: number;
   departureTime: number;
   geometry: [number, number][];
+  steps: RouteStep[];
+};
+
+export type RouteStep = {
+  instruction: string;
+  distanceM: number;
+  durationSec: number;
 };
 
 export type RouteOption = {
   id: string;
+  profile: "walking" | "cycling";
   totalDurationSec: number;
+  totalDistanceM: number;
   departureTime: number;
   arrivalTime: number;
   legs: RouteLeg[];
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseLeg(leg: any): RouteLeg {
-  const mode = String(leg.mode ?? leg.transportation?.mode ?? "WALK").toUpperCase();
-  const isTransit = !["WALK", "BICYCLE", "CAR"].includes(mode);
-  const points: string = leg.legGeometry?.points ?? leg.LegGeometry?.points ?? "";
-  const geometry = points ? decodePolyline(points) : [];
-  const line =
-    leg.route || leg.routeShortName || leg.Route ||
-    leg.Transportation?.PublicCode || leg.transportation?.publicCode || undefined;
-  const lineName =
-    leg.routeLongName || leg.RouteLongName ||
-    leg.Transportation?.Name || leg.transportation?.name || undefined;
-
-  // startTime can be ms timestamp or ISO string
-  let departureTime = Date.now();
-  const raw = leg.startTime ?? leg.StartTime ?? leg.departureTime;
-  if (typeof raw === "number") departureTime = raw;
-  else if (typeof raw === "string") departureTime = new Date(raw).getTime();
-
-  return {
-    mode: isTransit ? "TRANSIT" : "WALK",
-    line,
-    lineName,
-    durationSec: Math.round(leg.duration ?? leg.Duration ?? 0),
-    distanceM: Math.round(leg.distance ?? leg.Distance ?? 0),
-    departureTime,
-    geometry,
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseItinerary(it: any, idx: number): RouteOption {
-  const rawLegs = it.legs ?? it.Leg ?? it.leg ?? [];
-  const legs = (Array.isArray(rawLegs) ? rawLegs : [rawLegs]).map(parseLeg);
-
-  // duration can be seconds (number) or ISO 8601 "PT20M30S"
-  let totalDurationSec = 0;
-  const dur = it.duration ?? it.Duration;
-  if (typeof dur === "number") totalDurationSec = dur;
-  else if (typeof dur === "string" && dur.startsWith("PT")) {
-    const m = dur.match(/(\d+H)?(\d+M)?(\d+S)?/);
-    if (m) {
-      totalDurationSec =
-        (parseInt(m[1] ?? "0") || 0) * 3600 +
-        (parseInt(m[2] ?? "0") || 0) * 60 +
-        (parseInt(m[3] ?? "0") || 0);
-    }
-  }
-
-  const startRaw = it.startTime ?? it.StartTime ?? it.departureTime;
-  const endRaw = it.endTime ?? it.EndTime ?? it.arrivalTime;
-  const departureTime = typeof startRaw === "number" ? startRaw : new Date(startRaw ?? Date.now()).getTime();
-  const arrivalTime = typeof endRaw === "number" ? endRaw : new Date(endRaw ?? Date.now()).getTime();
-
-  return { id: String(idx), totalDurationSec, departureTime, arrivalTime, legs };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractItineraries(data: any): any[] {
-  // OTP standard
-  if (Array.isArray(data?.plan?.itineraries)) return data.plan.itineraries;
-  if (Array.isArray(data?.itineraries)) return data.itineraries;
-  // 511 SIRI-style
-  const siri =
-    data?.Siri?.ServiceDelivery?.TripPlanningDelivery?.TripPlan ??
-    data?.ServiceDelivery?.TripPlanningDelivery?.TripPlan ??
-    data?.TripPlan;
-  if (siri) {
-    const it = siri.Itinerary ?? siri.itinerary;
-    return Array.isArray(it) ? it : it ? [it] : [];
-  }
-  if (Array.isArray(data)) return data;
-  return [];
-}
+const MAPBOX_TOKEN = process.env.MAPBOX_SERVER_TOKEN ?? process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
 export async function GET(req: NextRequest) {
-  if (!SF511_KEY) {
-    console.error("[tripplan] SF_511_API_KEY is not set");
-    return NextResponse.json({ error: "SF_511_API_KEY not configured" }, { status: 500 });
+  if (!MAPBOX_TOKEN) {
+    return NextResponse.json({ error: "Mapbox token not configured" }, { status: 500 });
   }
 
   const { searchParams } = req.nextUrl;
@@ -112,46 +46,77 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "missing params" }, { status: 400 });
   }
 
-  const url = new URL("https://api.511.org/transit/tripplan");
-  url.searchParams.set("api_key", SF511_KEY);
-  url.searchParams.set("origin", `${olat},${olng}`);
-  url.searchParams.set("destination", `${dlat},${dlng}`);
-  url.searchParams.set("format", "json");
+  // Fetch both walking and cycling in parallel
+  const [walkRes, bikeRes] = await Promise.all([
+    fetchDirections(olng, olat, dlng, dlat, "walking"),
+    fetchDirections(olng, olat, dlng, dlat, "cycling"),
+  ]);
 
-  let raw: string;
-  let res: Response;
-  try {
-    res = await fetch(url.toString(), { cache: "no-store" });
-    raw = await res.text();
-  } catch (e) {
-    console.error("[tripplan] fetch failed:", e);
-    return NextResponse.json({ error: "network error" }, { status: 502 });
+  const routes: RouteOption[] = [];
+  const now = Date.now();
+
+  for (const [profile, data] of [["walking", walkRes], ["cycling", bikeRes]] as const) {
+    const route = data?.routes?.[0];
+    if (!route) continue;
+
+    const durationSec = Math.round(route.duration);
+    const distanceM = Math.round(route.distance);
+    const geometry: [number, number][] = route.geometry.coordinates;
+
+    const steps: RouteStep[] = (route.legs?.[0]?.steps ?? []).map((s: {
+      maneuver: { instruction: string };
+      distance: number;
+      duration: number;
+    }) => ({
+      instruction: s.maneuver.instruction,
+      distanceM: Math.round(s.distance),
+      durationSec: Math.round(s.duration),
+    }));
+
+    routes.push({
+      id: profile,
+      profile,
+      totalDurationSec: durationSec,
+      totalDistanceM: distanceM,
+      departureTime: now,
+      arrivalTime: now + durationSec * 1000,
+      legs: [{
+        mode: profile === "cycling" ? "CYCLING" : "WALK",
+        durationSec,
+        distanceM,
+        departureTime: now,
+        geometry,
+        steps,
+      }],
+    });
   }
 
-  if (!res.ok) {
-    console.error("[tripplan] 511 returned", res.status, raw.slice(0, 500));
-    return NextResponse.json({ error: `511 error ${res.status}`, detail: raw.slice(0, 200) }, { status: 502 });
+  if (routes.length === 0) {
+    return NextResponse.json({ error: "No routes found" }, { status: 404 });
   }
 
-  // Strip BOM (﻿) — 511 commonly includes it
-  const cleaned = raw.replace(/^﻿/, "").trim();
-
-  let data: unknown;
-  try {
-    data = JSON.parse(cleaned);
-  } catch (e) {
-    console.error("[tripplan] JSON parse failed:", e, "raw:", cleaned.slice(0, 300));
-    return NextResponse.json({ error: "JSON parse failed", detail: cleaned.slice(0, 200) }, { status: 502 });
-  }
-
-  const itineraries = extractItineraries(data);
-  console.log("[tripplan] found", itineraries.length, "itineraries");
-
-  if (itineraries.length === 0) {
-    console.error("[tripplan] no itineraries in response. Keys:", Object.keys(data as object));
-    return NextResponse.json({ error: "no routes", detail: JSON.stringify(data).slice(0, 300) }, { status: 404 });
-  }
-
-  const routes: RouteOption[] = itineraries.slice(0, 4).map(parseItinerary);
   return NextResponse.json(routes);
+}
+
+async function fetchDirections(
+  olng: string, olat: string,
+  dlng: string, dlat: string,
+  profile: "walking" | "cycling"
+) {
+  const url =
+    `https://api.mapbox.com/directions/v5/mapbox/${profile}/` +
+    `${olng},${olat};${dlng},${dlat}` +
+    `?access_token=${MAPBOX_TOKEN}&geometries=geojson&steps=true&overview=full`;
+
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      console.error(`[tripplan] Mapbox ${profile} returned ${res.status}`);
+      return null;
+    }
+    return res.json();
+  } catch (e) {
+    console.error(`[tripplan] fetch ${profile} failed:`, e);
+    return null;
+  }
 }
