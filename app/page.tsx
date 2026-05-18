@@ -105,14 +105,8 @@ export default function Home() {
     <main className="relative w-screen h-screen bg-black">
       <Map coords={coords} route={activeRoute} />
 
-      {/* Top bar: search */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex gap-2 items-start">
-        {/* ETA panel shrinks to icon when navigating */}
-        {!destination && (
-          <div className="shrink-0">
-            <EtaPanel coords={coords} />
-          </div>
-        )}
+      {/* Search bar — full width at top */}
+      <div className="absolute top-4 left-4 right-4 z-10">
         <SearchBar
           userCoords={coords}
           onSelect={setDestination}
@@ -121,9 +115,9 @@ export default function Home() {
         />
       </div>
 
-      {/* Route panel — shown when destination is set */}
+      {/* Route options — below search */}
       {destination && coords && (
-        <div className="absolute top-20 left-4 right-4 z-10">
+        <div className="absolute top-16 left-4 right-4 z-10">
           <RoutePanel
             userCoords={coords}
             destination={destination}
@@ -134,7 +128,14 @@ export default function Home() {
         </div>
       )}
 
-      {/* Bottom: clock (hidden when route active to reduce clutter) */}
+      {/* ETA panel — bottom left, hidden while navigating */}
+      {!destination && (
+        <div className="absolute bottom-6 left-4 z-10">
+          <EtaPanel coords={coords} />
+        </div>
+      )}
+
+      {/* Clock — bottom center, hidden while navigating */}
       {!activeRoute && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10">
           <Clock />
