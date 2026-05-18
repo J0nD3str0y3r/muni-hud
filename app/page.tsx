@@ -7,7 +7,13 @@ import EtaPanel from "@/components/EtaPanel";
 // mapbox-gl uses browser-only APIs — never SSR
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
-export type Coords = { lat: number; lng: number };
+export type Coords = {
+  lat: number;
+  lng: number;
+  heading: number | null; // degrees from north, null when stationary
+  speed: number | null;   // m/s, null when unavailable
+  accuracy: number;       // meters
+};
 
 type LocationState = "idle" | "waiting" | "active" | "denied" | "unavailable";
 
@@ -25,13 +31,19 @@ export default function Home() {
     const id = navigator.geolocation.watchPosition(
       (pos) => {
         setLocState("active");
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setCoords({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          heading: pos.coords.heading,
+          speed: pos.coords.speed,
+          accuracy: pos.coords.accuracy,
+        });
       },
       (err) => {
         if (err.code === err.PERMISSION_DENIED) setLocState("denied");
         else setLocState("unavailable");
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
     );
 
     return () => navigator.geolocation.clearWatch(id);
