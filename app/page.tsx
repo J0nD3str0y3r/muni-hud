@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import EtaPanel, { type StopPin } from "@/components/EtaPanel";
 import SearchBar, { type Destination } from "@/components/SearchBar";
@@ -21,14 +21,94 @@ export type Coords = {
 
 type LocationState = "idle" | "waiting" | "active" | "denied" | "unavailable";
 
+// Fake bike route through SF (Mission → Embarcadero area)
+const SPOOF_ROUTE: [number, number][] = [
+  [37.77855, -122.41275],
+  [37.77945, -122.41120],
+  [37.78080, -122.40990],
+  [37.78250, -122.40890],
+  [37.78470, -122.40730],
+  [37.78720, -122.40510],
+  [37.78980, -122.40320],
+  [37.79240, -122.40100],
+  [37.79480, -122.39840],
+  [37.79700, -122.39590],
+  [37.79880, -122.39310],
+  [37.80060, -122.39040],
+  [37.80220, -122.38800],
+  [37.80400, -122.38570],
+  [37.80610, -122.38350],
+  [37.80800, -122.38160],
+];
+const SPOOF_INTERVAL_MS = 2000; // step every 2 seconds
+
+function bearingDeg(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6_371_000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export default function Home() {
   const [coords, setCoords] = useState<Coords | null>(null);
   const [locState, setLocState] = useState<LocationState>("idle");
   const [destination, setDestination] = useState<Destination | null>(null);
   const [activeRoute, setActiveRoute] = useState<RouteOption | null>(null);
   const [stopPin, setStopPin] = useState<StopPin | null>(null);
+  const spoofIndexRef = useRef(0);
+
+  // Check for ?spoof=1 in the URL
+  const isSpoofMode =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("spoof") === "1";
+
+  // Spoof mode — auto-starts, no permission needed
+  useEffect(() => {
+    if (!isSpoofMode) return;
+    spoofIndexRef.current = 0;
+
+    function applyIndex(i: number) {
+      const [lat, lng] = SPOOF_ROUTE[i];
+      const next = SPOOF_ROUTE[Math.min(i + 1, SPOOF_ROUTE.length - 1)];
+      const heading = i < SPOOF_ROUTE.length - 1
+        ? bearingDeg(lat, lng, next[0], next[1])
+        : null;
+      const dist = haversineM(lat, lng, next[0], next[1]);
+      const speed = dist / (SPOOF_INTERVAL_MS / 1000); // m/s
+
+      setCoords({ lat, lng, heading, speed, accuracy: 5 });
+      setLocState("active");
+    }
+
+    applyIndex(0);
+
+    const id = setInterval(() => {
+      spoofIndexRef.current = Math.min(
+        spoofIndexRef.current + 1,
+        SPOOF_ROUTE.length - 1
+      );
+      applyIndex(spoofIndexRef.current);
+      if (spoofIndexRef.current >= SPOOF_ROUTE.length - 1) clearInterval(id);
+    }, SPOOF_INTERVAL_MS);
+
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSpoofMode]);
 
   const startTracking = useCallback(() => {
+    if (isSpoofMode) return; // spoof handles it
     if (!navigator.geolocation) { setLocState("unavailable"); return; }
     setLocState("waiting");
 
@@ -51,14 +131,14 @@ export default function Home() {
     );
 
     return () => navigator.geolocation.clearWatch(id);
-  }, []);
+  }, [isSpoofMode]);
 
   function handleClearDestination() {
     setDestination(null);
     setActiveRoute(null);
   }
 
-  if (locState === "idle" || locState === "waiting") {
+  if (!isSpoofMode && (locState === "idle" || locState === "waiting")) {
     return (
       <main
         className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 cursor-pointer select-none"
@@ -106,6 +186,13 @@ export default function Home() {
   return (
     <main className="relative w-screen h-screen bg-black">
       <Map coords={coords} route={activeRoute} stopPin={stopPin} />
+
+      {/* Spoof mode banner */}
+      {isSpoofMode && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-yellow-500/80 text-black text-[10px] font-bold tracking-widest text-center py-1 uppercase">
+          Spoof mode — fake bike route active
+        </div>
+      )}
 
       {activeRoute ? (
         /* ── NAVIGATION MODE ── */
