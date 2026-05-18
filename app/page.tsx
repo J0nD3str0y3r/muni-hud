@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Map from "@/components/Map";
+import dynamic from "next/dynamic";
 import EtaPanel from "@/components/EtaPanel";
+
+// mapbox-gl uses browser-only APIs — never SSR
+const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
 export type Coords = { lat: number; lng: number };
 
