@@ -246,9 +246,9 @@ export default function Home() {
             />
           </div>
 
-          {/* Route options — below search */}
+          {/* Route options — right side, vertically centered */}
           {destination && coords && (
-            <div className="absolute top-16 left-4 right-4 z-10">
+            <div className="absolute top-1/2 -translate-y-1/2 right-4 z-10 w-72">
               <RoutePanel
                 userCoords={coords}
                 destination={destination}

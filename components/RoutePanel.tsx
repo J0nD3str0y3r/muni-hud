@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Coords } from "@/app/page";
 import type { Destination } from "./SearchBar";
 import type { RouteOption } from "@/app/api/tripplan/route";
+import { lineColor } from "@/lib/lineColor";
 
 type Props = {
   userCoords: Coords;
@@ -29,11 +30,13 @@ function formatTime(ms: number) {
 const PROFILE_LABEL: Record<string, string> = {
   walking: "Walk",
   cycling: "Bike",
+  transit: "Transit",
 };
 
 const PROFILE_ICON: Record<string, string> = {
   walking: "🚶",
   cycling: "🚲",
+  transit: "🚌",
 };
 
 export default function RoutePanel({
@@ -93,7 +96,7 @@ export default function RoutePanel({
 
     return (
       <div className="bg-black/70 backdrop-blur-md border border-white/15 rounded-xl px-4 py-2.5 flex items-center gap-3">
-        <span className="text-base shrink-0">{PROFILE_ICON[activeRoute.profile]}</span>
+        <span className="text-base shrink-0">{PROFILE_ICON[activeRoute.profile] ?? "🗺️"}</span>
         <div className="flex-1 min-w-0">
           <div className="text-white text-xs font-semibold truncate">
             {destination.name.split(",")[0]}
@@ -141,7 +144,7 @@ export default function RoutePanel({
             onClick={() => onSelectRoute(opt)}
             className="w-full text-left px-4 py-3 hover:bg-white/5 active:bg-white/10 transition-colors"
           >
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-base">{PROFILE_ICON[opt.profile]}</span>
                 <div>
@@ -154,10 +157,61 @@ export default function RoutePanel({
                 <div className="text-white/30 text-[10px]">arr {formatTime(opt.arrivalTime)}</div>
               </div>
             </div>
+
+            {/* Multi-modal leg pills for transit */}
+            {opt.profile === "transit" && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {opt.legs.map((leg, i) => {
+                  if (leg.mode === "WALK") {
+                    return (
+                      <span key={i} className="text-white/50 text-[10px] flex items-center gap-0.5">
+                        🚶 {formatDuration(leg.durationSec)}
+                      </span>
+                    );
+                  }
+                  if (leg.mode === "TRANSIT") {
+                    return (
+                      <span key={i} className="flex items-center gap-1">
+                        <span className="text-white/30 text-[9px]">→</span>
+                        <span
+                          className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          style={{ background: lineColor(leg.line ?? ""), color: "#000" }}
+                        >
+                          {leg.line}
+                        </span>
+                        {leg.headsign && (
+                          <span className="text-white/40 text-[10px] truncate max-w-[80px]">
+                            {leg.headsign}
+                          </span>
+                        )}
+                        {leg.waitSec !== undefined && leg.waitSec > 0 && (
+                          <span className="text-white/30 text-[9px]">
+                            ({Math.round(leg.waitSec / 60)}m wait)
+                          </span>
+                        )}
+                        <span className="text-white/30 text-[9px]">→</span>
+                      </span>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            )}
+
+            {/* Board/alight stop names */}
+            {opt.profile === "transit" && (() => {
+              const transitLeg = opt.legs.find(l => l.mode === "TRANSIT");
+              if (!transitLeg) return null;
+              return (
+                <div className="text-white/30 text-[9px] mt-1 truncate">
+                  {transitLeg.boardStopName} → {transitLeg.alightStopName}
+                </div>
+              );
+            })()}
           </button>
 
-          {/* Step preview toggle */}
-          {opt.legs[0]?.steps?.length > 0 && (
+          {/* Step preview toggle (walk/bike only) */}
+          {opt.profile !== "transit" && opt.legs[0]?.steps?.length > 0 && (
             <button
               onClick={() => setExpandedStep(expandedStep === opt.id ? null : opt.id)}
               className="w-full px-4 pb-2 text-left text-white/25 text-[10px] hover:text-white/40 transition-colors"
