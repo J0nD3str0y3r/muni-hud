@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
-import EtaPanel from "@/components/EtaPanel";
+import EtaPanel, { type StopPin } from "@/components/EtaPanel";
 import SearchBar, { type Destination } from "@/components/SearchBar";
 import RoutePanel from "@/components/RoutePanel";
 import type { RouteOption } from "@/app/api/tripplan/route";
@@ -25,6 +25,7 @@ export default function Home() {
   const [locState, setLocState] = useState<LocationState>("idle");
   const [destination, setDestination] = useState<Destination | null>(null);
   const [activeRoute, setActiveRoute] = useState<RouteOption | null>(null);
+  const [stopPin, setStopPin] = useState<StopPin | null>(null);
 
   const startTracking = useCallback(() => {
     if (!navigator.geolocation) { setLocState("unavailable"); return; }
@@ -103,7 +104,7 @@ export default function Home() {
 
   return (
     <main className="relative w-screen h-screen bg-black">
-      <Map coords={coords} route={activeRoute} />
+      <Map coords={coords} route={activeRoute} stopPin={stopPin} />
 
       {/* Search bar — full width at top */}
       <div className="absolute top-4 left-4 right-4 z-10">
@@ -130,7 +131,7 @@ export default function Home() {
 
       {/* ETA panel — bottom left, always visible */}
       <div className="absolute bottom-6 left-4 z-10">
-        <EtaPanel coords={coords} />
+        <EtaPanel coords={coords} onStopPin={setStopPin} />
       </div>
 
       {/* Clock — bottom center, hidden while navigating */}

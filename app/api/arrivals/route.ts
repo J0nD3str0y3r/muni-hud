@@ -5,10 +5,12 @@ const SF511_KEY = process.env.SF_511_API_KEY!;
 type Stop = { id: string; name: string; lat: number; lon: number };
 export type Arrival = {
   line: string;
-  headsign: string;  // destination of the vehicle e.g. "Embarcadero"
+  headsign: string;
   minutes: number;
   stopName: string;
   stopId: string;
+  stopLat: number;
+  stopLng: number;
 };
 
 function distance(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -28,7 +30,8 @@ async function fetchNearestStop(lat: number, lng: number): Promise<Stop | null> 
   const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) return null;
 
-  const data = await res.json();
+  const raw = await res.text();
+  const data = JSON.parse(raw.replace(/^﻿/, ""));
   type RawStop = { id: unknown; Name: unknown; Location?: { Latitude?: unknown; Longitude?: unknown } };
   const stops: Stop[] = (data?.Contents?.dataObjects?.ScheduledStopPoint ?? []).map(
     (s: RawStop) => ({
@@ -50,34 +53,52 @@ async function fetchArrivals(stop: Stop): Promise<Arrival[]> {
   const res = await fetch(url, { next: { revalidate: 0 } });
   if (!res.ok) return [];
 
-  const data = await res.json();
-  const visits = data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
+  const raw = await res.text();
+  const data = JSON.parse(raw.replace(/^﻿/, ""));
+  const visits: Record<string, unknown>[] =
+    data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
 
   return visits
-    .slice(0, 5)
-    .map((v: Record<string, unknown>) => {
-      const journey = (v as { MonitoredVehicleJourney?: Record<string, unknown> })
-        .MonitoredVehicleJourney as Record<string, unknown> | undefined;
-      const call = (journey as { MonitoredCall?: Record<string, unknown> } | undefined)
-        ?.MonitoredCall as Record<string, unknown> | undefined;
+    .slice(0, 6)
+    .flatMap((v) => {
+      const journey = v.MonitoredVehicleJourney as Record<string, unknown> | undefined;
+      const call = (journey?.MonitoredCall) as Record<string, unknown> | undefined;
 
-      const aimed = String(call?.AimedArrivalTime ?? call?.ExpectedArrivalTime ?? "");
-      const now = Date.now();
-      const eta = new Date(aimed).getTime();
-      const minutes = isNaN(eta) ? null : Math.max(0, Math.round((eta - now) / 60_000));
+      // LineRef is the route short name (9R, 38, N, etc.)
+      // PublishedLineName is often the direction/destination — don't use it for line
+      const line = String(journey?.LineRef ?? journey?.PublishedLineName ?? "?").trim();
+      if (line === "?") return [];
 
-      const line = String(journey?.PublishedLineName ?? "?");
-      // DestinationName or DirectionRef gives the headsign
+      // Headsign: DestinationName is where the vehicle is headed
       const headsign = String(
         journey?.DestinationName ??
-        journey?.DirectionRef ??
         call?.DestinationDisplay ??
+        journey?.DirectionRef ??
+        ""
+      ).trim();
+
+      // Prefer ExpectedArrivalTime for real-time, fall back to Aimed
+      const timeStr = String(
+        call?.ExpectedArrivalTime ??
+        call?.AimedArrivalTime ??
         ""
       );
+      if (!timeStr) return [];
 
-      return { line, headsign, minutes, stopName: stop.name, stopId: stop.id };
-    })
-    .filter((p: { line: string; minutes: number | null }) => p.line !== "?" && p.minutes !== null) as Arrival[];
+      const eta = new Date(timeStr).getTime();
+      if (isNaN(eta)) return [];
+      const minutes = Math.max(0, Math.round((eta - Date.now()) / 60_000));
+
+      return [{
+        line,
+        headsign,
+        minutes,
+        stopName: stop.name,
+        stopId: stop.id,
+        stopLat: stop.lat,
+        stopLng: stop.lon,
+      }];
+    });
 }
 
 export async function GET(req: NextRequest) {

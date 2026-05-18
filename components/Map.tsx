@@ -5,6 +5,8 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { Coords } from "@/app/page";
 import type { RouteOption } from "@/app/api/tripplan/route";
+import type { StopPin } from "@/components/EtaPanel";
+import { lineColor } from "@/lib/lineColor";
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
@@ -19,9 +21,11 @@ const DEST_LAYER = "dest-layer";
 export default function Map({
   coords,
   route,
+  stopPin,
 }: {
   coords: Coords | null;
   route: RouteOption | null;
+  stopPin: StopPin | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -197,6 +201,50 @@ export default function Map({
       }
     }
   }, [route]);
+
+  // Stop pin marker — updates whenever nearest stop changes
+  const stopMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    stopMarkerRef.current?.remove();
+    stopMarkerRef.current = null;
+
+    if (!stopPin) return;
+
+    // Build a small pill showing all line colors
+    const el = document.createElement("div");
+    el.style.cssText =
+      "display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default";
+
+    const pill = document.createElement("div");
+    pill.style.cssText =
+      "display:flex;gap:3px;background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.15);" +
+      "border-radius:8px;padding:3px 6px;backdrop-filter:blur(8px)";
+
+    stopPin.lines.slice(0, 4).forEach((line) => {
+      const badge = document.createElement("span");
+      badge.textContent = line;
+      badge.style.cssText =
+        `background:${lineColor(line)};color:#000;font-size:9px;font-weight:700;` +
+        "border-radius:4px;padding:1px 5px;white-space:nowrap";
+      pill.appendChild(badge);
+    });
+
+    // Small triangle stem pointing down
+    const stem = document.createElement("div");
+    stem.style.cssText =
+      "width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;" +
+      "border-top:6px solid rgba(0,0,0,0.75)";
+
+    el.appendChild(pill);
+    el.appendChild(stem);
+
+    stopMarkerRef.current = new mapboxgl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([stopPin.lng, stopPin.lat])
+      .addTo(map);
+  }, [stopPin]);
 
   return <div ref={containerRef} className="w-full h-full" />;
 }
