@@ -128,26 +128,39 @@ export default function Home() {
   }, [isSpoofMode]);
 
   const startTracking = useCallback(() => {
-    if (isSpoofMode) return; // spoof handles it
+    if (isSpoofMode) return;
     if (!navigator.geolocation) { setLocState("unavailable"); return; }
     setLocState("waiting");
 
-    const id = navigator.geolocation.watchPosition(
-      (pos) => {
-        setLocState("active");
-        setCoords({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          heading: pos.coords.heading,
-          speed: pos.coords.speed,
-          accuracy: pos.coords.accuracy,
-        });
-      },
+    const onPosition = (pos: GeolocationPosition) => {
+      setLocState("active");
+      setCoords({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        heading: pos.coords.heading,
+        speed: pos.coords.speed,
+        accuracy: pos.coords.accuracy,
+      });
+    };
+
+    // Start with high accuracy. On timeout fall back to network-based location
+    // so the app works on desktop and in poor GPS conditions.
+    let id = navigator.geolocation.watchPosition(
+      onPosition,
       (err) => {
-        if (err.code === err.PERMISSION_DENIED) setLocState("denied");
-        else setLocState("unavailable");
+        if (err.code === err.PERMISSION_DENIED) {
+          setLocState("denied");
+          return;
+        }
+        // TIMEOUT or POSITION_UNAVAILABLE — retry without high accuracy
+        navigator.geolocation.clearWatch(id);
+        id = navigator.geolocation.watchPosition(
+          onPosition,
+          () => setLocState("unavailable"),
+          { enableHighAccuracy: false, maximumAge: 10000, timeout: 30000 }
+        );
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
     );
 
     return () => navigator.geolocation.clearWatch(id);
@@ -194,10 +207,13 @@ export default function Home() {
 
   if (locState === "unavailable") {
     return (
-      <main className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 px-8 text-center">
-        <div className="text-white/60 text-sm">Location unavailable</div>
+      <main
+        className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 px-8 text-center cursor-pointer"
+        onClick={startTracking}
+      >
+        <div className="text-white/60 text-sm">Couldn't get location</div>
         <p className="text-white/30 text-xs max-w-xs">
-          GPS timed out or geolocation is not supported on this device.
+          Make sure location is enabled for this site in your browser settings, then tap to retry.
         </p>
       </main>
     );
