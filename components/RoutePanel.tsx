@@ -69,37 +69,44 @@ export default function RoutePanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destination.lat, destination.lng]);
 
-  // Active route — compact strip with first step
+  // Active route — compact strip with live stats
   if (activeRoute) {
-    const leg = activeRoute.legs[0];
-    const nextStep = leg?.steps?.[0];
+    const remainingM = userCoords
+      ? (() => {
+          const lastLeg = activeRoute.legs[activeRoute.legs.length - 1];
+          const dest = lastLeg?.geometry[lastLeg.geometry.length - 1];
+          if (!dest) return activeRoute.totalDistanceM;
+          const R = 6_371_000;
+          const dLat = ((dest[1] - userCoords.lat) * Math.PI) / 180;
+          const dLng = ((dest[0] - userCoords.lng) * Math.PI) / 180;
+          const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos((userCoords.lat * Math.PI) / 180) *
+            Math.cos((dest[1] * Math.PI) / 180) *
+            Math.sin(dLng / 2) ** 2;
+          return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        })()
+      : activeRoute.totalDistanceM;
+
+    const pace = activeRoute.totalDurationSec / Math.max(activeRoute.totalDistanceM, 1);
+    const remainingMins = Math.max(0, Math.round((remainingM * pace) / 60));
+    const arrivalMs = Date.now() + remainingM * pace * 1000;
+
     return (
-      <div className="bg-black/70 backdrop-blur-md border border-white/15 rounded-xl overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-3">
-          <span className="text-lg">{PROFILE_ICON[activeRoute.profile]}</span>
-          <div className="flex-1 min-w-0">
-            <div className="text-white text-xs font-semibold truncate">
-              {destination.name.split(",")[0]}
-            </div>
-            <div className="text-white/40 text-[10px]">
-              {formatDuration(activeRoute.totalDurationSec)} · {formatDistance(activeRoute.totalDistanceM)} · arr {formatTime(activeRoute.arrivalTime)}
-            </div>
+      <div className="bg-black/70 backdrop-blur-md border border-white/15 rounded-xl px-4 py-2.5 flex items-center gap-3">
+        <span className="text-base shrink-0">{PROFILE_ICON[activeRoute.profile]}</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-white text-xs font-semibold truncate">
+            {destination.name.split(",")[0]}
           </div>
-          <button
-            onClick={onCancel}
-            className="text-white/40 hover:text-white/80 transition-colors shrink-0"
-            aria-label="Cancel"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-          </button>
+          <div className="text-white/40 text-[10px] tabular-nums">
+            {remainingMins} min · {formatDistance(remainingM)} · arr {formatTime(arrivalMs)}
+          </div>
         </div>
-        {nextStep && (
-          <div className="px-4 py-2 bg-white/5 border-t border-white/10 text-white/60 text-xs truncate">
-            ↑ {nextStep.instruction}
-          </div>
-        )}
+        <button onClick={onCancel} className="text-white/40 hover:text-white/80 shrink-0" aria-label="Cancel">
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
       </div>
     );
   }

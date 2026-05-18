@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import EtaPanel, { type StopPin } from "@/components/EtaPanel";
 import SearchBar, { type Destination } from "@/components/SearchBar";
 import RoutePanel from "@/components/RoutePanel";
-import NavPanel from "@/components/NavPanel";
 import TurnPanel from "@/components/TurnPanel";
 import type { RouteOption } from "@/app/api/tripplan/route";
 
@@ -111,14 +110,9 @@ export default function Home() {
       {activeRoute ? (
         /* ── NAVIGATION MODE ── */
         <>
-          {/* Turn card — top right, prominent */}
-          <div className="absolute top-4 right-4 z-10">
-            <TurnPanel route={activeRoute} coords={coords} />
-          </div>
-
-          {/* Compact route strip — top left (doesn't overlap turn card) */}
+          {/* Compact route strip — top left */}
           {destination && coords && (
-            <div className="absolute top-4 left-4 z-10" style={{ right: "150px" }}>
+            <div className="absolute top-4 left-4 right-4 z-10">
               <RoutePanel
                 userCoords={coords}
                 destination={destination}
@@ -129,9 +123,9 @@ export default function Home() {
             </div>
           )}
 
-          {/* Nav summary — right side middle */}
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
-            <NavPanel route={activeRoute} coords={coords} />
+          {/* Turn card — bottom right, prominent */}
+          <div className="absolute bottom-6 right-4 z-10">
+            <TurnPanel route={activeRoute} coords={coords} />
           </div>
         </>
       ) : (
