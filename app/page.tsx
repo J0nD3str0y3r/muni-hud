@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import EtaPanel, { type StopPin } from "@/components/EtaPanel";
 import SearchBar, { type Destination } from "@/components/SearchBar";
 import RoutePanel from "@/components/RoutePanel";
+import NavPanel from "@/components/NavPanel";
 import type { RouteOption } from "@/app/api/tripplan/route";
 
 // mapbox-gl uses browser-only APIs — never SSR
@@ -133,6 +134,13 @@ export default function Home() {
       <div className="absolute bottom-6 left-4 z-10">
         <EtaPanel coords={coords} onStopPin={setStopPin} />
       </div>
+
+      {/* Nav panel — right side, only while navigating */}
+      {activeRoute && (
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
+          <NavPanel route={activeRoute} />
+        </div>
+      )}
 
       {/* Clock — bottom center, hidden while navigating */}
       {!activeRoute && (
