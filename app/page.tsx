@@ -3,6 +3,9 @@
 import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import EtaPanel from "@/components/EtaPanel";
+import SearchBar, { type Destination } from "@/components/SearchBar";
+import RoutePanel from "@/components/RoutePanel";
+import type { RouteOption } from "@/app/api/tripplan/route";
 
 // mapbox-gl uses browser-only APIs — never SSR
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
@@ -10,9 +13,9 @@ const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 export type Coords = {
   lat: number;
   lng: number;
-  heading: number | null; // degrees from north, null when stationary
-  speed: number | null;   // m/s, null when unavailable
-  accuracy: number;       // meters
+  heading: number | null;
+  speed: number | null;
+  accuracy: number;
 };
 
 type LocationState = "idle" | "waiting" | "active" | "denied" | "unavailable";
@@ -20,12 +23,11 @@ type LocationState = "idle" | "waiting" | "active" | "denied" | "unavailable";
 export default function Home() {
   const [coords, setCoords] = useState<Coords | null>(null);
   const [locState, setLocState] = useState<LocationState>("idle");
+  const [destination, setDestination] = useState<Destination | null>(null);
+  const [activeRoute, setActiveRoute] = useState<RouteOption | null>(null);
 
   const startTracking = useCallback(() => {
-    if (!navigator.geolocation) {
-      setLocState("unavailable");
-      return;
-    }
+    if (!navigator.geolocation) { setLocState("unavailable"); return; }
     setLocState("waiting");
 
     const id = navigator.geolocation.watchPosition(
@@ -49,8 +51,10 @@ export default function Home() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  // Intentionally no auto-start — always require a tap so the browser
-  // receives a user gesture before the permission prompt fires on mobile.
+  function handleClearDestination() {
+    setDestination(null);
+    setActiveRoute(null);
+  }
 
   if (locState === "idle" || locState === "waiting") {
     return (
@@ -79,8 +83,8 @@ export default function Home() {
       >
         <div className="text-white/60 text-sm">Location access denied</div>
         <p className="text-white/30 text-xs max-w-xs">
-          Your browser blocked location. In your browser settings, find this
-          site and set Location to <strong className="text-white/50">Allow</strong>, then tap here to retry.
+          In your browser settings, set Location to{" "}
+          <strong className="text-white/50">Allow</strong> for this site, then tap to retry.
         </p>
       </main>
     );
@@ -91,7 +95,7 @@ export default function Home() {
       <main className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 px-8 text-center">
         <div className="text-white/60 text-sm">Location unavailable</div>
         <p className="text-white/30 text-xs max-w-xs">
-          GPS timed out or your device doesn't support geolocation.
+          GPS timed out or geolocation is not supported on this device.
         </p>
       </main>
     );
@@ -99,15 +103,43 @@ export default function Home() {
 
   return (
     <main className="relative w-screen h-screen bg-black">
-      <Map coords={coords} />
+      <Map coords={coords} route={activeRoute} />
 
-      <div className="absolute top-4 left-4 z-10">
-        <EtaPanel coords={coords} />
+      {/* Top bar: search */}
+      <div className="absolute top-4 left-4 right-4 z-10 flex gap-2 items-start">
+        {/* ETA panel shrinks to icon when navigating */}
+        {!destination && (
+          <div className="shrink-0">
+            <EtaPanel coords={coords} />
+          </div>
+        )}
+        <SearchBar
+          userCoords={coords}
+          onSelect={setDestination}
+          onClear={handleClearDestination}
+          hasDestination={!!destination}
+        />
       </div>
 
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 text-center">
-        <Clock />
-      </div>
+      {/* Route panel — shown when destination is set */}
+      {destination && coords && (
+        <div className="absolute top-20 left-4 right-4 z-10">
+          <RoutePanel
+            userCoords={coords}
+            destination={destination}
+            onSelectRoute={(r) => setActiveRoute(r)}
+            onCancel={handleClearDestination}
+            activeRoute={activeRoute}
+          />
+        </div>
+      )}
+
+      {/* Bottom: clock (hidden when route active to reduce clutter) */}
+      {!activeRoute && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10">
+          <Clock />
+        </div>
+      )}
     </main>
   );
 }
@@ -123,7 +155,5 @@ function Clock() {
     return () => clearInterval(id);
   }, []);
 
-  return (
-    <span className="text-white/60 text-sm tracking-widest tabular-nums">{time}</span>
-  );
+  return <span className="text-white/60 text-sm tracking-widest tabular-nums">{time}</span>;
 }
