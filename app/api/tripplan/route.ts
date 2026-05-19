@@ -258,8 +258,30 @@ async function buildTransitOptions(
       });
     }
 
-    console.log(`[tripplan] built ${options.length} transit options`);
-    return options.slice(0, 4);
+    // Deduplicate by transit-line sequence: Google often returns the same route
+    // multiple times at different departure times. Keep the fastest per unique
+    // sequence, then sort and cap at 5 distinct route types.
+    const byLineSeq = new Map<string, RouteOption>();
+    for (const opt of options) {
+      const seq = opt.legs
+        .filter((l) => l.mode === "TRANSIT")
+        .map((l) => l.line ?? "?")
+        .join("→");
+      const existing = byLineSeq.get(seq);
+      if (!existing || opt.totalDurationSec < existing.totalDurationSec) {
+        byLineSeq.set(seq, opt);
+      }
+    }
+    const deduped = [...byLineSeq.values()].sort(
+      (a, b) => a.totalDurationSec - b.totalDurationSec
+    );
+    console.log(
+      `[tripplan] built ${options.length} options → ${deduped.length} unique sequences:`,
+      deduped.map((o) =>
+        o.legs.filter((l) => l.mode === "TRANSIT").map((l) => l.line).join("→")
+      )
+    );
+    return deduped.slice(0, 5);
   } catch (err) {
     console.error("[tripplan] buildTransitOptions fatal:", err);
     return [];
