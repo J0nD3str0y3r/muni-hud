@@ -12,6 +12,8 @@ export type Arrival = {
   stopLat: number;
   stopLng: number;
   agency: "MUNI" | "BART";
+  bearing?: number;    // vehicle GPS bearing 0-360, 0 = north
+  directionRef?: string; // agency direction code e.g. "IB", "OB", "N", "S"
 };
 
 function distance(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -74,9 +76,18 @@ async function fetchArrivals(stop: Stop, agency: "MUNI" | "BART"): Promise<Arriv
       const headsign = String(
         journey?.DestinationName ??
         call?.DestinationDisplay ??
-        journey?.DirectionRef ??
         ""
       ).trim();
+
+      const directionRef = String(journey?.DirectionRef ?? "").trim() || undefined;
+
+      // Bearing lives directly on the journey or nested under VehicleLocation
+      const rawBearing =
+        (journey?.Bearing as number | undefined) ??
+        ((journey?.VehicleLocation as Record<string, unknown> | undefined)?.Bearing as number | undefined);
+      const bearing = rawBearing != null && !isNaN(Number(rawBearing))
+        ? Number(rawBearing)
+        : undefined;
 
       const timeStr = String(
         call?.ExpectedArrivalTime ??
@@ -98,6 +109,8 @@ async function fetchArrivals(stop: Stop, agency: "MUNI" | "BART"): Promise<Arriv
         stopLat: stop.lat,
         stopLng: stop.lon,
         agency,
+        bearing,
+        directionRef,
       }];
     });
 }
