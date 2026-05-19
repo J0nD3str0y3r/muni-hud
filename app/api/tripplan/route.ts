@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { decodePolyline } from "@/lib/polyline";
 
-const SF511_KEY = process.env.SF_511_API_KEY!;
 const MAPBOX_TOKEN = process.env.MAPBOX_SECRET_TOKEN ?? process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY!;
 
 export type RouteStep = {
   instruction: string;
@@ -38,98 +39,31 @@ export type RouteOption = {
   legs: RouteLeg[];
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function haversineM(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const R = 6_371_000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+// Google Maps maneuver string → our type/modifier
+function parseManeuver(gManeuver: string): { type: string; modifier: string } {
+  if (!gManeuver) return { type: "continue", modifier: "straight" };
+  const m = gManeuver.toLowerCase();
+  if (m === "turn-left")          return { type: "turn", modifier: "left" };
+  if (m === "turn-right")         return { type: "turn", modifier: "right" };
+  if (m === "turn-sharp-left")    return { type: "turn", modifier: "sharp left" };
+  if (m === "turn-sharp-right")   return { type: "turn", modifier: "sharp right" };
+  if (m === "turn-slight-left")   return { type: "turn", modifier: "slight left" };
+  if (m === "turn-slight-right")  return { type: "turn", modifier: "slight right" };
+  if (m === "uturn-left" || m === "uturn-right") return { type: "turn", modifier: "uturn" };
+  if (m === "roundabout-left")    return { type: "roundabout", modifier: "left" };
+  if (m === "roundabout-right")   return { type: "roundabout", modifier: "right" };
+  if (m === "merge")              return { type: "merge", modifier: "straight" };
+  if (m === "fork-left")          return { type: "fork", modifier: "left" };
+  if (m === "fork-right")         return { type: "fork", modifier: "right" };
+  if (m === "ferry")              return { type: "continue", modifier: "straight" };
+  if (m === "straight")           return { type: "continue", modifier: "straight" };
+  return { type: "continue", modifier: "straight" };
 }
 
-function strip(text: string) {
-  return text.replace(/^﻿/, "").trim();
-}
-
-// ─── 511 data fetchers ────────────────────────────────────────────────────────
-
-type Stop = { id: string; name: string; lat: number; lng: number };
-
-async function fetchAllStops(): Promise<Stop[]> {
-  const res = await fetch(
-    `https://api.511.org/transit/stops?api_key=${SF511_KEY}&operator_id=SF&format=json`,
-    { next: { revalidate: 3600 } }
-  );
-  if (!res.ok) return [];
-  const data = JSON.parse(strip(await res.text()));
-  type R = { id: unknown; Name: unknown; Location?: { Latitude?: unknown; Longitude?: unknown } };
-  return (data?.Contents?.dataObjects?.ScheduledStopPoint ?? []).map((s: R) => ({
-    id: String(s.id),
-    name: String(s.Name),
-    lat: Number(s.Location?.Latitude),
-    lng: Number(s.Location?.Longitude),
-  })).filter((s: Stop) => s.lat && s.lng);
-}
-
-type Arrival = { line: string; headsign: string; minutes: number; stopName: string };
-
-async function fetchArrivalsAt(stopId: string, stopName: string): Promise<Arrival[]> {
-  const res = await fetch(
-    `https://api.511.org/transit/StopMonitoring?api_key=${SF511_KEY}&agency=SF&stopCode=${stopId}&format=json`,
-    { cache: "no-store" }
-  );
-  if (!res.ok) return [];
-  const data = JSON.parse(strip(await res.text()));
-  const visits = data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
-
-  return visits.flatMap((v: Record<string, unknown>) => {
-    const j = v.MonitoredVehicleJourney as Record<string, unknown> | undefined;
-    const call = (j?.MonitoredCall) as Record<string, unknown> | undefined;
-    const line = String(j?.LineRef ?? "?").trim();
-    if (line === "?") return [];
-    const headsign = String(j?.DestinationName ?? j?.DirectionRef ?? "").trim();
-    const timeStr = String(call?.ExpectedArrivalTime ?? call?.AimedArrivalTime ?? "");
-    if (!timeStr) return [];
-    const eta = new Date(timeStr).getTime();
-    if (isNaN(eta)) return [];
-    const minutes = Math.max(0, Math.round((eta - Date.now()) / 60_000));
-    return [{ line, headsign, minutes, stopName }];
-  });
-}
-
-// Attempt to get stops served by a line — returns empty array if endpoint 404s
-async function fetchLineStops(lineId: string): Promise<Stop[]> {
-  try {
-    const res = await fetch(
-      `https://api.511.org/transit/patterns?api_key=${SF511_KEY}&operator_id=SF&line_id=${encodeURIComponent(lineId)}&format=json`,
-      { next: { revalidate: 3600 } }
-    );
-    if (!res.ok) return [];
-    const data = JSON.parse(strip(await res.text()));
-
-    // Try multiple response shapes
-    const patterns: unknown[] =
-      data?.journeyPatterns ?? data?.JourneyPatterns ??
-      (Array.isArray(data) ? data : []);
-
-    const stopIds = new Set<string>();
-    for (const pat of patterns) {
-      const pts = (pat as Record<string, unknown>)?.PointsInSequence as Record<string, unknown> | undefined;
-      const seq: unknown[] =
-        (pts?.StopPointInJourneyPattern as unknown[]) ??
-        (pts?.stopPointInJourneyPattern as unknown[]) ?? [];
-      for (const pt of seq) {
-        const ref = String((pt as Record<string, unknown>)?.StopPointRef ?? "");
-        if (ref) stopIds.add(ref);
-      }
-    }
-    return Array.from(stopIds).map(id => ({ id, name: "", lat: 0, lng: 0 }));
-  } catch {
-    return [];
-  }
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, "").trim();
 }
 
 // ─── Mapbox walking / cycling ─────────────────────────────────────────────────
@@ -184,176 +118,127 @@ async function fetchMapboxRoute(
   } catch { return null; }
 }
 
-// ─── Transit option builder ───────────────────────────────────────────────────
-
-async function fetchAllBartStops(): Promise<Stop[]> {
-  const res = await fetch(
-    `https://api.511.org/transit/stops?api_key=${SF511_KEY}&operator_id=BA&format=json`,
-    { next: { revalidate: 3600 } }
-  );
-  if (!res.ok) return [];
-  const data = JSON.parse(strip(await res.text()));
-  type R = { id: unknown; Name: unknown; Location?: { Latitude?: unknown; Longitude?: unknown } };
-  return (data?.Contents?.dataObjects?.ScheduledStopPoint ?? []).map((s: R) => ({
-    id: String(s.id),
-    name: String(s.Name),
-    lat: Number(s.Location?.Latitude),
-    lng: Number(s.Location?.Longitude),
-  })).filter((s: Stop) => s.lat && s.lng);
-}
-
-async function fetchBartArrivalsAt(stopId: string, stopName: string): Promise<Arrival[]> {
-  const res = await fetch(
-    `https://api.511.org/transit/StopMonitoring?api_key=${SF511_KEY}&agency=BA&stopCode=${stopId}&format=json`,
-    { cache: "no-store" }
-  );
-  if (!res.ok) return [];
-  const data = JSON.parse(strip(await res.text()));
-  const visits = data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit ?? [];
-
-  return visits.flatMap((v: Record<string, unknown>) => {
-    const j = v.MonitoredVehicleJourney as Record<string, unknown> | undefined;
-    const call = (j?.MonitoredCall) as Record<string, unknown> | undefined;
-    const line = String(j?.LineRef ?? "?").trim();
-    if (line === "?") return [];
-    const headsign = String(j?.DestinationName ?? j?.DirectionRef ?? "").trim();
-    const timeStr = String(call?.ExpectedArrivalTime ?? call?.AimedArrivalTime ?? "");
-    if (!timeStr) return [];
-    const eta = new Date(timeStr).getTime();
-    if (isNaN(eta)) return [];
-    const minutes = Math.max(0, Math.round((eta - Date.now()) / 60_000));
-    return [{ line, headsign, minutes, stopName }];
-  });
-}
+// ─── Google Maps transit routing ──────────────────────────────────────────────
 
 async function buildTransitOptions(
   olat: number, olng: number,
   dlat: number, dlng: number
 ): Promise<RouteOption[]> {
-  const WALK_SPEED = 1.4;   // m/s (~3 mph)
-  const MUNI_SPEED = 6;     // m/s (~13 mph)
-  const BART_SPEED = 15;    // m/s (~34 mph)
+  if (!GOOGLE_MAPS_KEY) return [];
 
-  const [allStops, allBartStops] = await Promise.all([
-    fetchAllStops(),
-    fetchAllBartStops(),
-  ]);
-  if (allStops.length === 0 && allBartStops.length === 0) return [];
+  const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
+  url.searchParams.set("origin", `${olat},${olng}`);
+  url.searchParams.set("destination", `${dlat},${dlng}`);
+  url.searchParams.set("mode", "transit");
+  url.searchParams.set("alternatives", "true");
+  url.searchParams.set("key", GOOGLE_MAPS_KEY);
 
-  type AgencyConfig = {
-    stops: Stop[];
-    destStops: Stop[];
-    originStop: Stop;
-    speed: number;
-    agencyCode: "SF" | "BA";
-    idPrefix: string;
-  };
+  try {
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (data.status !== "OK") return [];
 
-  const configs: AgencyConfig[] = [];
+    const now = Date.now();
+    const options: RouteOption[] = [];
 
-  if (allStops.length > 0) {
-    const originStop = [...allStops].sort(
-      (a, b) => haversineM(olat, olng, a.lat, a.lng) - haversineM(olat, olng, b.lat, b.lng)
-    )[0];
-    const destStops = [...allStops].sort(
-      (a, b) => haversineM(dlat, dlng, a.lat, a.lng) - haversineM(dlat, dlng, b.lat, b.lng)
-    ).slice(0, 8);
-    configs.push({ stops: allStops, destStops, originStop, speed: MUNI_SPEED, agencyCode: "SF", idPrefix: "muni" });
-  }
+    for (const route of data.routes ?? []) {
+      const gmLeg = route.legs?.[0];
+      if (!gmLeg) continue;
 
-  if (allBartStops.length > 0) {
-    const originStop = [...allBartStops].sort(
-      (a, b) => haversineM(olat, olng, a.lat, a.lng) - haversineM(olat, olng, b.lat, b.lng)
-    )[0];
-    const destStops = [...allBartStops].sort(
-      (a, b) => haversineM(dlat, dlng, a.lat, a.lng) - haversineM(dlat, dlng, b.lat, b.lng)
-    ).slice(0, 5);
-    configs.push({ stops: allBartStops, destStops, originStop, speed: BART_SPEED, agencyCode: "BA", idPrefix: "bart" });
-  }
+      const legs: RouteLeg[] = [];
+      let cursor = now;
 
-  const now = Date.now();
-  const options: RouteOption[] = [];
+      for (const step of gmLeg.steps ?? []) {
+        const durationSec: number = step.duration.value;
+        const distanceM: number = step.distance.value;
+        const geometry = decodePolyline(step.polyline.points);
+        const startCoord: [number, number] = geometry[0] ?? [olng, olat];
 
-  await Promise.all(configs.map(async ({ destStops, originStop, speed, agencyCode, idPrefix }) => {
-    const fetchFn = agencyCode === "BA" ? fetchBartArrivalsAt : fetchArrivalsAt;
-    const arrivals = await fetchFn(originStop.id, originStop.name);
-    if (arrivals.length === 0) return;
+        if (step.travel_mode === "WALKING") {
+          const subSteps: RouteStep[] = (step.steps ?? []).map((s: {
+            html_instructions: string;
+            distance: { value: number };
+            duration: { value: number };
+            maneuver?: string;
+            polyline: { points: string };
+          }) => {
+            const { type, modifier } = parseManeuver(s.maneuver ?? "");
+            const subGeom = decodePolyline(s.polyline.points);
+            return {
+              instruction: stripHtml(s.html_instructions),
+              distanceM: s.distance.value,
+              durationSec: s.duration.value,
+              maneuverType: type,
+              maneuverModifier: modifier,
+              streetName: "",
+              location: subGeom[0] ?? startCoord,
+            };
+          });
 
-    const byLine = new Map<string, Arrival>();
-    for (const a of arrivals) {
-      if (!byLine.has(a.line)) byLine.set(a.line, a);
-    }
+          legs.push({
+            mode: "WALK",
+            durationSec,
+            distanceM,
+            departureTime: cursor,
+            geometry,
+            steps: subSteps,
+          });
+          cursor += durationSec * 1000;
 
-    await Promise.all(Array.from(byLine.values()).map(async (arrival) => {
-      const walkToBoardM = haversineM(olat, olng, originStop.lat, originStop.lng);
-      const walkToBoardSec = walkToBoardM / WALK_SPEED;
+        } else if (step.travel_mode === "TRANSIT") {
+          const td = step.transit_details;
+          const line =
+            td?.line?.short_name ??
+            td?.line?.name ??
+            "?";
+          const headsign = td?.headsign ?? "";
+          const boardStopName = td?.departure_stop?.name ?? "";
+          const alightStopName = td?.arrival_stop?.name ?? "";
 
-      let alightStop: Stop | null = null;
-      if (agencyCode === "SF") {
-        const lineStops = await fetchLineStops(arrival.line);
-        if (lineStops.length > 0) {
-          for (const ds of destStops) {
-            if (lineStops.some(ls => ls.id === ds.id)) { alightStop = ds; break; }
-          }
+          // Departure time from real schedule
+          const scheduledDepartureMs = td?.departure_time?.value
+            ? td.departure_time.value * 1000
+            : cursor;
+          const waitSec = Math.max(0, Math.round((scheduledDepartureMs - cursor) / 1000));
+
+          legs.push({
+            mode: "TRANSIT",
+            durationSec,
+            distanceM,
+            departureTime: scheduledDepartureMs,
+            geometry,
+            steps: [],
+            line,
+            headsign,
+            boardStopName,
+            alightStopName,
+            waitSec,
+          });
+          cursor = scheduledDepartureMs + durationSec * 1000;
         }
       }
-      if (!alightStop) alightStop = destStops[0];
-      if (!alightStop) return;
 
-      const transitM = haversineM(originStop.lat, originStop.lng, alightStop.lat, alightStop.lng);
-      const transitSec = transitM / speed;
-      const waitSec = arrival.minutes * 60;
-      const walkFromAlightM = haversineM(alightStop.lat, alightStop.lng, dlat, dlng);
-      const walkFromAlightSec = walkFromAlightM / WALK_SPEED;
-      const totalSec = walkToBoardSec + waitSec + transitSec + walkFromAlightSec;
+      if (legs.length === 0) continue;
 
-      if (transitM < walkToBoardM * 0.5) return;
+      const transitLines = legs
+        .filter((l) => l.mode === "TRANSIT")
+        .map((l) => l.line)
+        .join("+");
 
       options.push({
-        id: `${idPrefix}-${arrival.line}`,
+        id: `transit-${transitLines || "walk"}`,
         profile: "transit",
-        totalDurationSec: Math.round(totalSec),
-        totalDistanceM: Math.round(walkToBoardM + transitM + walkFromAlightM),
+        totalDurationSec: gmLeg.duration.value,
+        totalDistanceM: gmLeg.distance.value,
         departureTime: now,
-        arrivalTime: now + totalSec * 1000,
-        legs: [
-          {
-            mode: "WALK",
-            durationSec: Math.round(walkToBoardSec),
-            distanceM: Math.round(walkToBoardM),
-            departureTime: now,
-            geometry: [[olng, olat], [originStop.lng, originStop.lat]],
-            steps: [],
-          },
-          {
-            mode: "TRANSIT",
-            durationSec: Math.round(transitSec),
-            distanceM: Math.round(transitM),
-            departureTime: now + walkToBoardSec * 1000,
-            geometry: [[originStop.lng, originStop.lat], [alightStop.lng, alightStop.lat]],
-            steps: [],
-            line: arrival.line,
-            headsign: arrival.headsign,
-            boardStopName: originStop.name,
-            alightStopName: alightStop.name,
-            waitSec,
-          },
-          {
-            mode: "WALK",
-            durationSec: Math.round(walkFromAlightSec),
-            distanceM: Math.round(walkFromAlightM),
-            departureTime: now + (walkToBoardSec + waitSec + transitSec) * 1000,
-            geometry: [[alightStop.lng, alightStop.lat], [dlng, dlat]],
-            steps: [],
-          },
-        ],
+        arrivalTime: now + gmLeg.duration.value * 1000,
+        legs,
       });
-    }));
-  }));
+    }
 
-  return options
-    .sort((a, b) => a.totalDurationSec - b.totalDurationSec)
-    .slice(0, 5);
+    return options.slice(0, 4);
+  } catch { return []; }
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
