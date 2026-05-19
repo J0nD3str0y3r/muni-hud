@@ -12,6 +12,7 @@ type Props = {
   onSelectRoute: (route: RouteOption) => void;
   onCancel: () => void;
   activeRoute: RouteOption | null;
+  onRoutesLoaded?: (routes: RouteOption[]) => void;
 };
 
 function formatDuration(sec: number) {
@@ -45,6 +46,7 @@ export default function RoutePanel({
   onSelectRoute,
   onCancel,
   activeRoute,
+  onRoutesLoaded,
 }: Props) {
   const [options, setOptions] = useState<RouteOption[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,6 +68,7 @@ export default function RoutePanel({
         if (!Array.isArray(data) || data.length === 0)
           throw new Error("No routes found");
         setOptions(data);
+        onRoutesLoaded?.(data);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));

@@ -86,6 +86,7 @@ export default function Home() {
   const [locState, setLocState] = useState<LocationState>("idle");
   const [destination, setDestination] = useState<Destination | null>(null);
   const [activeRoute, setActiveRoute] = useState<RouteOption | null>(null);
+  const [routeOptions, setRouteOptions] = useState<RouteOption[] | null>(null);
   const [stopPin, setStopPin] = useState<StopPin | null>(null);
   const spoofIndexRef = useRef(0);
 
@@ -169,6 +170,7 @@ export default function Home() {
   function handleClearDestination() {
     setDestination(null);
     setActiveRoute(null);
+    setRouteOptions(null);
   }
 
   if (!isSpoofMode && (locState === "idle" || locState === "waiting")) {
@@ -247,6 +249,7 @@ export default function Home() {
                 onSelectRoute={(r) => setActiveRoute(r)}
                 onCancel={handleClearDestination}
                 activeRoute={activeRoute}
+                onRoutesLoaded={setRouteOptions}
               />
             </div>
           )}
@@ -286,6 +289,7 @@ export default function Home() {
                 onSelectRoute={(r) => setActiveRoute(r)}
                 onCancel={handleClearDestination}
                 activeRoute={activeRoute}
+                onRoutesLoaded={setRouteOptions}
               />
             </div>
           )}
@@ -294,7 +298,7 @@ export default function Home() {
 
       {/* ETA panel — bottom left, always visible */}
       <div className="absolute bottom-6 left-4 z-10">
-        <EtaPanel coords={coords} destination={destination} onStopPin={setStopPin} />
+        <EtaPanel coords={coords} destination={destination} routeOptions={routeOptions} onStopPin={setStopPin} />
       </div>
 
       {/* Clock — bottom center, hidden while navigating */}

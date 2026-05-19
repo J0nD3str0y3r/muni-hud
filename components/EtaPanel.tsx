@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Coords } from "@/app/page";
 import type { Destination } from "@/components/SearchBar";
 import type { Arrival } from "@/app/api/arrivals/route";
+import type { RouteOption } from "@/app/api/tripplan/route";
 import { lineColor, lineTextColor } from "@/lib/lineColor";
 
 export type StopPin = { lat: number; lng: number; name: string; lines: string[] };
@@ -11,6 +12,7 @@ export type StopPin = { lat: number; lng: number; name: string; lines: string[] 
 type Props = {
   coords: Coords | null;
   destination?: Destination | null;
+  routeOptions?: RouteOption[] | null;
   onStopPin?: (pin: StopPin | null) => void;
 };
 
@@ -72,7 +74,7 @@ function fareLabel(agency: "MUNI" | "BART"): string {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function EtaPanel({ coords, destination, onStopPin }: Props) {
+export default function EtaPanel({ coords, destination, routeOptions, onStopPin }: Props) {
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -155,11 +157,15 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
   }
 
   // ── Decision mode ─────────────────────────────────────────────────────────────
-  const WALK_SPEED = 1.4; // m/s
-  const TRANSIT_SPEED = 6; // m/s
 
-  const distToDest = haversineM(coords.lat, coords.lng, destination.lat, destination.lng);
-  const walkTimeSec = distToDest / WALK_SPEED;
+  // Use real Google Maps durations when available, fall back to haversine estimate
+  const walkRoute = routeOptions?.find((o) => o.profile === "walking");
+  const bestTransitRoute = routeOptions
+    ?.filter((o) => o.profile === "transit")
+    .sort((a, b) => a.totalDurationSec - b.totalDurationSec)[0] ?? null;
+
+  const walkTimeSec = walkRoute?.totalDurationSec
+    ?? (haversineM(coords.lat, coords.lng, destination.lat, destination.lng) / 1.4);
 
   if (!primary) {
     const walkMins = Math.round(walkTimeSec / 60);
@@ -174,12 +180,15 @@ export default function EtaPanel({ coords, destination, onStopPin }: Props) {
     );
   }
 
-  const walkToStopM = haversineM(coords.lat, coords.lng, primary.stopLat, primary.stopLng);
-  const walkToStopSec = walkToStopM / WALK_SPEED;
-  const waitSec = primary.minutes * 60;
-  const rideM = haversineM(primary.stopLat, primary.stopLng, destination.lat, destination.lng);
-  const rideSec = rideM / TRANSIT_SPEED;
-  const transitTotalSec = walkToStopSec + waitSec + rideSec;
+  // Transit total time: use real route if available, else estimate from arrivals data
+  const transitTotalSec = bestTransitRoute?.totalDurationSec
+    ?? (() => {
+      const walkToStopSec = haversineM(coords.lat, coords.lng, primary.stopLat, primary.stopLng) / 1.4;
+      const waitSec = primary.minutes * 60;
+      const rideSec = haversineM(primary.stopLat, primary.stopLng, destination.lat, destination.lng) / 6;
+      return walkToStopSec + waitSec + rideSec;
+    })();
+
   const timeSavedSec = walkTimeSec - transitTotalSec;
   const timeSavedMin = timeSavedSec / 60;
 
