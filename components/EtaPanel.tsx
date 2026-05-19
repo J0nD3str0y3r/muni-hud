@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Coords } from "@/app/page";
 import type { Destination } from "@/components/SearchBar";
 import type { Arrival } from "@/app/api/arrivals/route";
@@ -130,23 +130,35 @@ function groupByStop(arrivals: Arrival[], coords: Coords): StopGroup[] {
 
 export default function EtaPanel({ coords, destination, routeOptions, onStopPin }: Props) {
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
-  const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
+  // Always holds the latest coords without being a dep that restarts the poll
+  const coordsRef = useRef<Coords | null>(null);
+  coordsRef.current = coords;
+
+  // Ref-stable onStopPin so it doesn't restart the effect
+  const onStopPinRef = useRef(onStopPin);
+  onStopPinRef.current = onStopPin;
+
+  // Start polling once when coords first becomes available; GPS ticks don't restart it
+  const pollingStarted = useRef(false);
   useEffect(() => {
-    if (!coords) return;
+    if (!coords || pollingStarted.current) return;
+    pollingStarted.current = true;
+
     let cancelled = false;
 
     async function poll() {
-      setLoading(true);
+      const c = coordsRef.current;
+      if (!c || cancelled) return;
       try {
-        const res = await fetch(`/api/arrivals?lat=${coords!.lat}&lng=${coords!.lng}`);
+        const res = await fetch(`/api/arrivals?lat=${c.lat}&lng=${c.lng}`);
         if (!res.ok) throw new Error();
         const data: Arrival[] = await res.json();
-        if (!cancelled) {
+        if (!cancelled && data.length > 0) {
           setArrivals(data);
           const first = data[0];
-          onStopPin?.(first ? {
+          onStopPinRef.current?.(first ? {
             lat: first.stopLat,
             lng: first.stopLng,
             name: first.stopName,
@@ -154,7 +166,6 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
           } : null);
         }
       } catch { /* retry next interval */ }
-      finally { if (!cancelled) setLoading(false); }
     }
 
     poll();
