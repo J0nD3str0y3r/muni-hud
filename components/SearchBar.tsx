@@ -10,9 +10,9 @@ export type Destination = {
 };
 
 type Suggestion = {
-  id: string;
-  place_name: string;
-  center: [number, number]; // [lng, lat]
+  mapbox_id: string;
+  name: string;
+  place_formatted: string;
 };
 
 type Props = {
@@ -22,26 +22,46 @@ type Props = {
   hasDestination: boolean;
 };
 
+// Stable session token per component mount — required by Search Box API
+function makeSessionToken() {
+  return crypto.randomUUID();
+}
+
 export default function SearchBar({ userCoords, onSelect, onClear, hasDestination }: Props) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionToken = useRef(makeSessionToken());
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
   const fetchSuggestions = useCallback(
     async (q: string) => {
       if (q.length < 2) { setSuggestions([]); return; }
-      const proximity = userCoords
-        ? `&proximity=${userCoords.lng},${userCoords.lat}`
-        : "";
-      const url =
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
-        `?access_token=${token}&country=US&types=address,poi,place&limit=5${proximity}`;
+      const params = new URLSearchParams({
+        q,
+        access_token: token,
+        session_token: sessionToken.current,
+        country: "US",
+        limit: "6",
+        // poi, address, and place all in one call
+        types: "poi,address,place",
+      });
+      if (userCoords) {
+        params.set("proximity", `${userCoords.lng},${userCoords.lat}`);
+      }
       try {
-        const res = await fetch(url);
+        const res = await fetch(
+          `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`
+        );
         const data = await res.json();
-        setSuggestions(data.features ?? []);
+        setSuggestions(
+          (data.suggestions ?? []).map((s: { mapbox_id: string; name: string; place_formatted: string }) => ({
+            mapbox_id: s.mapbox_id,
+            name: s.name,
+            place_formatted: s.place_formatted,
+          }))
+        );
       } catch {
         setSuggestions([]);
       }
@@ -49,23 +69,46 @@ export default function SearchBar({ userCoords, onSelect, onClear, hasDestinatio
     [token, userCoords]
   );
 
+  async function retrieve(mapbox_id: string): Promise<{ lng: number; lat: number } | null> {
+    const params = new URLSearchParams({
+      access_token: token,
+      session_token: sessionToken.current,
+    });
+    try {
+      const res = await fetch(
+        `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapbox_id}?${params}`
+      );
+      const data = await res.json();
+      const coords = data.features?.[0]?.geometry?.coordinates;
+      if (!coords) return null;
+      return { lng: coords[0], lat: coords[1] };
+    } catch {
+      return null;
+    }
+  }
+
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => fetchSuggestions(query), 300);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [query, fetchSuggestions]);
 
-  function handleSelect(s: Suggestion) {
-    setQuery(s.place_name);
+  async function handleSelect(s: Suggestion) {
+    setQuery(s.name);
     setSuggestions([]);
     setOpen(false);
-    onSelect({ name: s.place_name, lng: s.center[0], lat: s.center[1] });
+    // Reset session token after a selection (Search Box API billing requirement)
+    sessionToken.current = makeSessionToken();
+    const coords = await retrieve(s.mapbox_id);
+    if (!coords) return;
+    onSelect({ name: `${s.name}, ${s.place_formatted}`, ...coords });
   }
 
   function handleClear() {
     setQuery("");
     setSuggestions([]);
     setOpen(false);
+    sessionToken.current = makeSessionToken();
     onClear();
   }
 
@@ -95,12 +138,13 @@ export default function SearchBar({ userCoords, onSelect, onClear, hasDestinatio
       {open && suggestions.length > 0 && (
         <ul className="absolute top-full left-0 right-0 mt-1 bg-black/90 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden z-50">
           {suggestions.map((s) => (
-            <li key={s.id}>
+            <li key={s.mapbox_id}>
               <button
                 onClick={() => handleSelect(s)}
-                className="w-full text-left px-4 py-2.5 text-xs text-white/70 hover:bg-white/10 active:bg-white/15 transition-colors border-b border-white/5 last:border-0 truncate"
+                className="w-full text-left px-4 py-2.5 hover:bg-white/10 active:bg-white/15 transition-colors border-b border-white/5 last:border-0"
               >
-                {s.place_name}
+                <div className="text-white/90 text-xs font-medium truncate">{s.name}</div>
+                <div className="text-white/40 text-[10px] truncate mt-0.5">{s.place_formatted}</div>
               </button>
             </li>
           ))}
