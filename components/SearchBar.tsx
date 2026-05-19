@@ -13,6 +13,7 @@ type Suggestion = {
   mapbox_id: string;
   name: string;
   place_formatted: string;
+  distanceM?: number;
 };
 
 type Props = {
@@ -21,6 +22,12 @@ type Props = {
   onClear: () => void;
   hasDestination: boolean;
 };
+
+function formatDist(m: number): string {
+  const ft = m * 3.28084;
+  if (ft < 1000) return `${Math.round(ft / 50) * 50} ft`;
+  return `${(m / 1609).toFixed(1)} mi`;
+}
 
 // Stable session token per component mount — required by Search Box API
 function makeSessionToken() {
@@ -56,10 +63,11 @@ export default function SearchBar({ userCoords, onSelect, onClear, hasDestinatio
         );
         const data = await res.json();
         setSuggestions(
-          (data.suggestions ?? []).map((s: { mapbox_id: string; name: string; place_formatted: string }) => ({
+          (data.suggestions ?? []).map((s: { mapbox_id: string; name: string; place_formatted: string; distance?: number }) => ({
             mapbox_id: s.mapbox_id,
             name: s.name,
             place_formatted: s.place_formatted,
+            distanceM: s.distance,
           }))
         );
       } catch {
@@ -97,9 +105,10 @@ export default function SearchBar({ userCoords, onSelect, onClear, hasDestinatio
     setQuery(s.name);
     setSuggestions([]);
     setOpen(false);
-    // Reset session token after a selection (Search Box API billing requirement)
-    sessionToken.current = makeSessionToken();
+    // retrieve must use the same session token as the suggest call
     const coords = await retrieve(s.mapbox_id);
+    // Reset session token only after retrieve completes (billing grouping requirement)
+    sessionToken.current = makeSessionToken();
     if (!coords) return;
     onSelect({ name: `${s.name}, ${s.place_formatted}`, ...coords });
   }
@@ -143,7 +152,12 @@ export default function SearchBar({ userCoords, onSelect, onClear, hasDestinatio
                 onClick={() => handleSelect(s)}
                 className="w-full text-left px-4 py-2.5 hover:bg-white/10 active:bg-white/15 transition-colors border-b border-white/5 last:border-0"
               >
-                <div className="text-white/90 text-xs font-medium truncate">{s.name}</div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-white/90 text-xs font-medium truncate">{s.name}</span>
+                  {s.distanceM != null && (
+                    <span className="text-white/40 text-[10px] shrink-0">{formatDist(s.distanceM)}</span>
+                  )}
+                </div>
                 <div className="text-white/40 text-[10px] truncate mt-0.5">{s.place_formatted}</div>
               </button>
             </li>
