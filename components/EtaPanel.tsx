@@ -216,22 +216,27 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
   const onStopPinRef = useRef(onStopPin);
   onStopPinRef.current = onStopPin;
 
-  // Start polling once when coords first becomes available; GPS ticks don't restart it
+  // Refs that survive across GPS-triggered effect re-runs
   const pollingStarted = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeRef = useRef(true);
+
+  // Start polling once when coords first becomes available.
+  // GPS ticks cause this effect to re-run, but pollingStarted blocks restart.
+  // The interval lives in a ref so the cleanup below doesn't kill it on GPS updates.
   useEffect(() => {
     if (!coords || pollingStarted.current) return;
     pollingStarted.current = true;
 
-    let cancelled = false;
-
     async function poll() {
       const c = coordsRef.current;
-      if (!c || cancelled) return;
+      if (!c || !activeRef.current) return;
       try {
         const res = await fetch(`/api/arrivals?lat=${c.lat}&lng=${c.lng}`);
         if (!res.ok) throw new Error();
         const data: Arrival[] = await res.json();
-        if (!cancelled && data.length > 0) {
+        if (!activeRef.current) return;
+        if (data.length > 0) {
           setArrivals(data);
           const first = data[0];
           onStopPinRef.current?.(first ? {
@@ -245,9 +250,18 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
     }
 
     poll();
-    const id = setInterval(poll, 30_000);
-    return () => { cancelled = true; clearInterval(id); };
+    intervalRef.current = setInterval(poll, 30_000);
+    // No cleanup returned here — GPS updates re-trigger this effect but pollingStarted
+    // blocks a restart; the interval must survive coord changes.
   }, [coords]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Unmount-only cleanup — runs once when the component is destroyed
+  useEffect(() => {
+    return () => {
+      activeRef.current = false;
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
 
   if (!coords) return null;
 
