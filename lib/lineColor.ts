@@ -1,49 +1,54 @@
-// Official colors for BART, Muni Metro, and streetcar lines.
-// Falls back to a hash-based palette for unlisted bus routes.
+// BART lines own red, orange, yellow, green, blue exclusively.
+// All other lines (Muni Metro, bus, streetcar) use the non-BART palette.
 
-const OFFICIAL: Record<string, string> = {
-  // ── BART ──────────────────────────────────────────────────────────
-  // BART 511 line IDs are destination-based, not color-based.
-  // Mapping by known terminus codes to the operating line color.
-  ANTC: "#FFD700", // Yellow Line  (Antioch)
-  BERY: "#F97316", // Orange Line  (Berryessa)
-  DALY: "#22C55E", // Green Line   (Daly City)
-  DUBL: "#3B82F6", // Blue Line    (Dublin/Pleasanton)
-  MLBR: "#EF4444", // Red Line     (Millbrae)
-  NCON: "#F97316", // Orange Line  (N Concord)
-  RICH: "#EF4444", // Red Line     (Richmond)
-  SFIA: "#FFD700", // Yellow Line  (SFO)
-  WARM: "#22C55E", // Green Line   (Warm Springs)
-
-  // ── Muni Metro (light rail) ────────────────────────────────────────
-  J: "#FBB919",   // J Church     — gold
-  K: "#4A90D9",   // K Ingleside  — blue
-  L: "#F97316",   // L Taraval    — orange
-  M: "#5B8C4A",   // M Ocean View — green
-  N: "#1D4ED8",   // N Judah      — dark blue
-  T: "#DC2626",   // T Third      — red
-
-  // ── Historic streetcar ─────────────────────────────────────────────
-  F: "#D4A017",   // F Market & Wharves — amber/historic
-  E: "#D4A017",   // E Embarcadero      — amber/historic
+// ── BART official colors (bart.gov) ────────────────────────────────────────
+// 511 BART line IDs are terminus-based, mapped to the operating line color.
+const BART: Record<string, string> = {
+  ANTC: "#FFD200", // Yellow  (Antioch)
+  SFIA: "#FFD200", // Yellow  (SFO/Millbrae)
+  BERY: "#FF9000", // Orange  (Berryessa)
+  NCON: "#FF9000", // Orange  (N Concord)
+  DALY: "#00AD6F", // Green   (Daly City)
+  WARM: "#00AD6F", // Green   (Warm Springs)
+  DUBL: "#009AC7", // Blue    (Dublin/Pleasanton)
+  MLBR: "#ED1C24", // Red     (Millbrae)
+  RICH: "#ED1C24", // Red     (Richmond)
 };
 
+// ── Non-BART lines: purples, pinks, teals, indigos, cyans, browns ──────────
+// None of these are red / orange / yellow / green / blue.
+const OTHER: Record<string, string> = {
+  // Muni Metro (light rail)
+  J: "#9333EA", // purple   — J Church
+  K: "#0891B2", // cyan     — K Ingleside
+  L: "#DB2777", // pink     — L Taraval
+  M: "#0F766E", // teal     — M Ocean View
+  N: "#4338CA", // indigo   — N Judah
+  T: "#BE185D", // rose     — T Third
+
+  // Historic streetcar
+  F: "#B45309", // amber-brown — F Market & Wharves
+  E: "#92400E", // dark brown  — E Embarcadero
+};
+
+// Fallback palette for unlisted bus routes — no red/orange/yellow/green/blue
 const FALLBACK = [
-  "#f97316", // orange
-  "#a78bfa", // purple
-  "#34d399", // green
-  "#fb7185", // pink
-  "#fbbf24", // yellow
-  "#38bdf8", // sky
-  "#f472b6", // rose
-  "#4ade80", // lime
+  "#9333EA", // purple
+  "#DB2777", // pink
+  "#0891B2", // cyan
+  "#4338CA", // indigo
+  "#0F766E", // teal
+  "#BE185D", // rose
+  "#B45309", // amber-brown
+  "#7C3AED", // violet
 ];
 
 const cache = new Map<string, string>();
 
 export function lineColor(line: string): string {
   const key = line.toUpperCase().trim();
-  if (OFFICIAL[key]) return OFFICIAL[key];
+  if (BART[key]) return BART[key];
+  if (OTHER[key]) return OTHER[key];
   if (!cache.has(key)) {
     let hash = 0;
     for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) & 0xff;
@@ -52,10 +57,21 @@ export function lineColor(line: string): string {
   return cache.get(key)!;
 }
 
-// True for dark badge backgrounds that need white text instead of black
+// White text on dark backgrounds, black on light
+const DARK_BACKGROUNDS = new Set([
+  "#4338CA", // indigo
+  "#9333EA", // purple
+  "#7C3AED", // violet
+  "#0F766E", // teal
+  "#BE185D", // rose
+  "#B45309", // amber-brown
+  "#92400E", // dark brown
+  "#0891B2", // cyan
+  "#ED1C24", // BART red
+  "#009AC7", // BART blue
+  "#00AD6F", // BART green
+]);
+
 export function lineTextColor(line: string): string {
-  const bg = lineColor(line);
-  // Dark backgrounds: dark blue, dark green, red
-  const dark = ["#1D4ED8", "#5B8C4A", "#DC2626", "#EF4444"];
-  return dark.includes(bg) ? "#ffffff" : "#000000";
+  return DARK_BACKGROUNDS.has(lineColor(line)) ? "#ffffff" : "#000000";
 }
