@@ -15,6 +15,15 @@ const BART: Record<string, string> = {
   RICH: "#ED1C24", // Red     (Richmond)
 };
 
+// 511 StopMonitoring returns color-based IDs like "Yellow-N", "Red-S", "BLUE", etc.
+const BART_COLOR: Record<string, string> = {
+  YELLOW: "#FFD200",
+  ORANGE: "#FF9000",
+  GREEN:  "#00AD6F",
+  BLUE:   "#009AC7",
+  RED:    "#ED1C24",
+};
+
 // ── Non-BART lines: purples, pinks, teals, indigos, cyans, browns ──────────
 // None of these are red / orange / yellow / green / blue.
 const OTHER: Record<string, string> = {
@@ -49,6 +58,9 @@ export function lineColor(line: string): string {
   const key = line.toUpperCase().trim();
   if (BART[key]) return BART[key];
   if (OTHER[key]) return OTHER[key];
+  // Handle 511 BART color-based IDs: "Yellow-N", "Red-S", "BLUE", etc.
+  const colorKey = key.replace(/[-_][NS]$/, "");
+  if (BART_COLOR[colorKey]) return BART_COLOR[colorKey];
   if (!cache.has(key)) {
     let hash = 0;
     for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) & 0xff;

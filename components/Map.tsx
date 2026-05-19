@@ -7,6 +7,7 @@ import type { Coords } from "@/app/page";
 import type { RouteOption } from "@/app/api/tripplan/route";
 import type { StopPin } from "@/components/EtaPanel";
 import { lineColor } from "@/lib/lineColor";
+import type { RouteLeg } from "@/app/api/tripplan/route";
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
@@ -69,7 +70,11 @@ export default function Map({
         source: ROUTE_SOURCE,
         filter: ["in", ["get", "mode"], ["literal", ["TRANSIT", "CYCLING"]]],
         paint: {
-          "line-color": ["match", ["get", "mode"], "CYCLING", "#a8ff78", "#4f9cff"],
+          "line-color": [
+            "case",
+            ["==", ["get", "mode"], "CYCLING"], "#a8ff78",
+            ["coalesce", ["get", "lineColor"], "#4f9cff"],
+          ],
           "line-opacity": 0.85,
           "line-width": 4,
         },
@@ -167,9 +172,14 @@ export default function Map({
     // Route lines
     const features = route.legs
       .filter((leg) => leg.geometry.length > 1)
-      .map((leg) => ({
+      .map((leg: RouteLeg) => ({
         type: "Feature" as const,
-        properties: { mode: leg.mode },
+        properties: {
+          mode: leg.mode,
+          lineColor: leg.mode === "TRANSIT"
+            ? (leg.lineColorHex ?? lineColor(leg.line ?? ""))
+            : null,
+        },
         geometry: { type: "LineString" as const, coordinates: leg.geometry },
       }));
     (map.getSource(ROUTE_SOURCE) as mapboxgl.GeoJSONSource)?.setData({
@@ -224,10 +234,15 @@ export default function Map({
       "border-radius:8px;padding:3px 6px;backdrop-filter:blur(8px)";
 
     stopPin.lines.slice(0, 4).forEach((line) => {
+      const bg = lineColor(line);
+      const r = parseInt(bg.slice(1, 3), 16);
+      const g = parseInt(bg.slice(3, 5), 16);
+      const b = parseInt(bg.slice(5, 7), 16);
+      const fg = (0.299 * r + 0.587 * g + 0.114 * b) < 140 ? "#fff" : "#000";
       const badge = document.createElement("span");
       badge.textContent = line;
       badge.style.cssText =
-        `background:${lineColor(line)};color:#000;font-size:9px;font-weight:700;` +
+        `background:${bg};color:${fg};font-size:9px;font-weight:700;` +
         "border-radius:4px;padding:1px 5px;white-space:nowrap";
       pill.appendChild(badge);
     });
