@@ -27,6 +27,7 @@ export type RouteLeg = {
   boardStopName?: string;
   alightStopName?: string;
   waitSec?: number;
+  lineColorHex?: string;
 };
 
 export type RouteOption = {
@@ -135,91 +136,111 @@ async function buildTransitOptions(
 
   try {
     const res = await fetch(url.toString(), { cache: "no-store" });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.error("[tripplan] Google Maps HTTP error:", res.status, await res.text());
+      return [];
+    }
     const data = await res.json();
+    console.log("[tripplan] Google Maps status:", data.status, "routes:", data.routes?.length ?? 0, data.error_message ?? "");
     if (data.status !== "OK") return [];
 
     const now = Date.now();
     const options: RouteOption[] = [];
 
-    for (const route of data.routes ?? []) {
+    for (let ri = 0; ri < (data.routes ?? []).length; ri++) {
+      const route = data.routes[ri];
       const gmLeg = route.legs?.[0];
-      if (!gmLeg) continue;
+      if (!gmLeg) { console.log(`[tripplan] route ${ri}: no leg, skipping`); continue; }
 
       const legs: RouteLeg[] = [];
       let cursor = now;
 
-      for (const step of gmLeg.steps ?? []) {
-        const durationSec: number = step.duration.value;
-        const distanceM: number = step.distance.value;
-        const geometry = decodePolyline(step.polyline.points);
-        const startCoord: [number, number] = geometry[0] ?? [olng, olat];
+      for (let si = 0; si < (gmLeg.steps ?? []).length; si++) {
+        const step = gmLeg.steps[si];
+        try {
+          const durationSec: number = step.duration?.value ?? 0;
+          const distanceM: number = step.distance?.value ?? 0;
+          const rawPoints: string = step.polyline?.points ?? "";
+          const geometry = rawPoints ? decodePolyline(rawPoints) : ([[olng, olat]] as [number, number][]);
+          const startCoord: [number, number] = geometry[0] ?? [olng, olat];
 
-        if (step.travel_mode === "WALKING") {
-          const subSteps: RouteStep[] = (step.steps ?? []).map((s: {
-            html_instructions: string;
-            distance: { value: number };
-            duration: { value: number };
-            maneuver?: string;
-            polyline: { points: string };
-          }) => {
-            const { type, modifier } = parseManeuver(s.maneuver ?? "");
-            const subGeom = decodePolyline(s.polyline.points);
-            return {
-              instruction: stripHtml(s.html_instructions),
-              distanceM: s.distance.value,
-              durationSec: s.duration.value,
-              maneuverType: type,
-              maneuverModifier: modifier,
-              streetName: "",
-              location: subGeom[0] ?? startCoord,
-            };
-          });
+          console.log(`[tripplan] route ${ri} step ${si}: mode=${step.travel_mode} dur=${durationSec} dist=${distanceM}`);
 
-          legs.push({
-            mode: "WALK",
-            durationSec,
-            distanceM,
-            departureTime: cursor,
-            geometry,
-            steps: subSteps,
-          });
-          cursor += durationSec * 1000;
+          if (step.travel_mode === "WALKING") {
+            const subSteps: RouteStep[] = (step.steps ?? []).map((s: {
+              html_instructions: string;
+              distance: { value: number };
+              duration: { value: number };
+              maneuver?: string;
+              polyline: { points: string };
+            }) => {
+              const { type, modifier } = parseManeuver(s.maneuver ?? "");
+              const subGeom = s.polyline?.points ? decodePolyline(s.polyline.points) : [startCoord];
+              return {
+                instruction: stripHtml(s.html_instructions ?? ""),
+                distanceM: s.distance?.value ?? 0,
+                durationSec: s.duration?.value ?? 0,
+                maneuverType: type,
+                maneuverModifier: modifier,
+                streetName: "",
+                location: subGeom[0] ?? startCoord,
+              };
+            });
 
-        } else if (step.travel_mode === "TRANSIT") {
-          const td = step.transit_details;
-          const line =
-            td?.line?.short_name ??
-            td?.line?.name ??
-            "?";
-          const headsign = td?.headsign ?? "";
-          const boardStopName = td?.departure_stop?.name ?? "";
-          const alightStopName = td?.arrival_stop?.name ?? "";
+            legs.push({
+              mode: "WALK",
+              durationSec,
+              distanceM,
+              departureTime: cursor,
+              geometry,
+              steps: subSteps,
+            });
+            cursor += durationSec * 1000;
 
-          // Departure time from real schedule
-          const scheduledDepartureMs = td?.departure_time?.value
-            ? td.departure_time.value * 1000
-            : cursor;
-          const waitSec = Math.max(0, Math.round((scheduledDepartureMs - cursor) / 1000));
+          } else if (step.travel_mode === "TRANSIT") {
+            const td = step.transit_details;
+            const line =
+              td?.line?.short_name ??
+              td?.line?.name ??
+              "?";
+            const lineColorHex: string | undefined = td?.line?.color
+              ? `#${td.line.color.replace(/^#/, "")}`
+              : undefined;
+            const headsign = td?.headsign ?? "";
+            const boardStopName = td?.departure_stop?.name ?? "";
+            const alightStopName = td?.arrival_stop?.name ?? "";
 
-          legs.push({
-            mode: "TRANSIT",
-            durationSec,
-            distanceM,
-            departureTime: scheduledDepartureMs,
-            geometry,
-            steps: [],
-            line,
-            headsign,
-            boardStopName,
-            alightStopName,
-            waitSec,
-          });
-          cursor = scheduledDepartureMs + durationSec * 1000;
+            const scheduledDepartureMs = td?.departure_time?.value
+              ? td.departure_time.value * 1000
+              : cursor;
+            const waitSec = Math.max(0, Math.round((scheduledDepartureMs - cursor) / 1000));
+
+            console.log(`[tripplan] route ${ri} step ${si}: TRANSIT line=${line} color=${lineColorHex} headsign=${headsign}`);
+
+            legs.push({
+              mode: "TRANSIT",
+              durationSec,
+              distanceM,
+              departureTime: scheduledDepartureMs,
+              geometry,
+              steps: [],
+              line,
+              headsign,
+              boardStopName,
+              alightStopName,
+              waitSec,
+              lineColorHex,
+            });
+            cursor = scheduledDepartureMs + durationSec * 1000;
+          } else {
+            console.log(`[tripplan] route ${ri} step ${si}: unhandled mode=${step.travel_mode}`);
+          }
+        } catch (stepErr) {
+          console.error(`[tripplan] route ${ri} step ${si} parse error:`, stepErr);
         }
       }
 
-      if (legs.length === 0) continue;
+      if (legs.length === 0) { console.log(`[tripplan] route ${ri}: 0 legs produced, skipping`); continue; }
 
       const transitLines = legs
         .filter((l) => l.mode === "TRANSIT")
@@ -227,18 +248,22 @@ async function buildTransitOptions(
         .join("+");
 
       options.push({
-        id: `transit-${transitLines || "walk"}`,
+        id: `transit-${ri}-${transitLines || "walk"}`,
         profile: "transit",
-        totalDurationSec: gmLeg.duration.value,
-        totalDistanceM: gmLeg.distance.value,
+        totalDurationSec: gmLeg.duration?.value ?? 0,
+        totalDistanceM: gmLeg.distance?.value ?? 0,
         departureTime: now,
-        arrivalTime: now + gmLeg.duration.value * 1000,
+        arrivalTime: now + (gmLeg.duration?.value ?? 0) * 1000,
         legs,
       });
     }
 
+    console.log(`[tripplan] built ${options.length} transit options`);
     return options.slice(0, 4);
-  } catch { return []; }
+  } catch (err) {
+    console.error("[tripplan] buildTransitOptions fatal:", err);
+    return [];
+  }
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────

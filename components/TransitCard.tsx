@@ -1,8 +1,22 @@
 "use client";
 
-import type { RouteOption } from "@/app/api/tripplan/route";
+import type { RouteOption, RouteLeg } from "@/app/api/tripplan/route";
 import type { Coords } from "@/app/page";
 import { lineColor, lineTextColor } from "@/lib/lineColor";
+
+function legBg(leg: RouteLeg): string {
+  return leg.lineColorHex ?? lineColor(leg.line ?? "");
+}
+
+function legFg(leg: RouteLeg): string {
+  const hex = leg.lineColorHex;
+  if (!hex) return lineTextColor(leg.line ?? "");
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  return lum < 140 ? "#ffffff" : "#000000";
+}
 
 type Props = {
   route: RouteOption;
@@ -53,8 +67,8 @@ export default function TransitCard({ route, coords, destinationName }: Props) {
         <span
           className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
           style={{
-            background: lineColor(transitLeg.line ?? ""),
-            color: lineTextColor(transitLeg.line ?? ""),
+            background: legBg(transitLeg),
+            color: legFg(transitLeg),
           }}
         >
           {transitLeg.line}

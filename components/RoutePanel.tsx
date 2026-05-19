@@ -3,8 +3,22 @@
 import { useEffect, useState } from "react";
 import type { Coords } from "@/app/page";
 import type { Destination } from "./SearchBar";
-import type { RouteOption } from "@/app/api/tripplan/route";
+import type { RouteOption, RouteLeg } from "@/app/api/tripplan/route";
 import { lineColor } from "@/lib/lineColor";
+
+function legBg(leg: RouteLeg): string {
+  return leg.lineColorHex ?? lineColor(leg.line ?? "");
+}
+
+function legFg(leg: RouteLeg): string {
+  const hex = leg.lineColorHex;
+  if (!hex) return "#000";
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  return lum < 140 ? "#ffffff" : "#000000";
+}
 
 type Props = {
   userCoords: Coords;
@@ -178,7 +192,7 @@ export default function RoutePanel({
                         <span className="text-white/30 text-[9px]">→</span>
                         <span
                           className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                          style={{ background: lineColor(leg.line ?? ""), color: "#000" }}
+                          style={{ background: legBg(leg), color: legFg(leg) }}
                         >
                           {leg.line}
                         </span>
