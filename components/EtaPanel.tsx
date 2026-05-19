@@ -119,36 +119,40 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
     const headsign = cleanHeadsign(primary.headsign);
 
     return (
-      <div className="bg-black/60 backdrop-blur-md border border-white/10 rounded-xl px-4 py-3 w-52">
-        <div className="flex items-center gap-2 mb-1">
+      <div className="bg-black/60 backdrop-blur-md border border-white/10 rounded-xl px-4 py-3 w-56">
+        <div className="flex items-center gap-2 mb-0.5">
           <span
             className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
             style={{ background: lineColor(primary.line), color: lineTextColor(primary.line) }}
           >
             {primary.line}
           </span>
-          <span className="text-white/70 text-xs truncate">
-            {label}{headsign ? ` → ${headsign}` : ""}
+          <span className="text-white/50 text-[10px]">
+            {primary.minutes <= 1 ? "Leaving now" : `${primary.minutes} min`}
           </span>
         </div>
-        <div className="text-white/40 text-[10px]">
-          {primary.minutes <= 1 ? "Leaving now" : `${primary.minutes} min · ${primary.stopName}`}
+        <div className="text-white/70 text-xs leading-snug mb-1">
+          {label}{headsign ? ` → ${headsign}` : ""}
         </div>
+        <div className="text-white/35 text-[10px] leading-snug">{primary.stopName}</div>
         {/* Secondary arrival */}
         {arrivals[1] && (() => {
           const sec = arrivals[1];
           const secHeadsign = cleanHeadsign(sec.headsign);
           return (
-            <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-2">
-              <span
-                className="text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"
-                style={{ background: lineColor(sec.line), color: lineTextColor(sec.line) }}
-              >
-                {sec.line}
-              </span>
-              <span className="text-white/30 text-[10px] truncate">
-                {routeLabel(sec.line, sec.agency)}{secHeadsign ? ` → ${secHeadsign}` : ""} · {sec.minutes}m
-              </span>
+            <div className="mt-2 pt-2 border-t border-white/5">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span
+                  className="text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"
+                  style={{ background: lineColor(sec.line), color: lineTextColor(sec.line) }}
+                >
+                  {sec.line}
+                </span>
+                <span className="text-white/25 text-[10px]">{sec.minutes}m</span>
+              </div>
+              <div className="text-white/25 text-[10px] leading-snug">
+                {routeLabel(sec.line, sec.agency)}{secHeadsign ? ` → ${secHeadsign}` : ""}
+              </div>
             </div>
           );
         })()}
@@ -210,7 +214,7 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
   ) ?? null;
 
   return (
-    <div className={`bg-black/70 backdrop-blur-md border ${cardBorder} rounded-xl px-4 py-3 w-56 shadow-xl transition-all ${cardOpacity}`}>
+    <div className={`bg-black/70 backdrop-blur-md border ${cardBorder} rounded-xl px-4 py-3 w-60 shadow-xl transition-all ${cardOpacity}`}>
 
       {/* Recommendation headline */}
       <div className="text-white text-sm font-bold mb-2.5 leading-snug">
@@ -234,7 +238,7 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
         </div>
       ) : (
         <div className="space-y-2.5">
-          {/* Line + headsign */}
+          {/* Line badge + arrival time */}
           <div className="flex items-center gap-2">
             <span
               className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
@@ -242,14 +246,14 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
             >
               {primary.line}
             </span>
-            <span className="text-white text-xs font-semibold truncate">
-              {label}{headsign ? ` → ${headsign}` : ""}
+            <span className={`text-xs font-medium ${primary.minutes <= 1 ? "text-amber-400" : "text-white/70"}`}>
+              {arrLabel} · {primary.minutes <= 1 ? "1 min" : `${primary.minutes} min`}
             </span>
           </div>
 
-          {/* Arrival urgency */}
-          <div className={`text-xs font-medium ${primary.minutes <= 1 ? "text-amber-400" : "text-white/70"}`}>
-            {arrLabel} · {primary.minutes <= 1 ? "1 min" : `${primary.minutes} min`}
+          {/* Headsign — full text, wraps */}
+          <div className="text-white text-xs font-semibold leading-snug">
+            {label}{headsign ? ` → ${headsign}` : ""}
           </div>
 
           {/* Similar time note for optional */}
@@ -257,26 +261,29 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
             <div className="text-white/35 text-[10px]">Similar time to walking</div>
           )}
 
-          {/* Fare + stop */}
+          {/* Fare + stop — full stop name, wraps */}
           <div className="border-t border-white/10 pt-2 space-y-0.5">
             <div className="text-white/40 text-[10px]">{fareLabel(primary.agency)}</div>
-            <div className="text-white/30 text-[10px] truncate">{primary.stopName}</div>
+            <div className="text-white/30 text-[10px] leading-snug">{primary.stopName}</div>
           </div>
 
           {/* Secondary option */}
           {secondary && (() => {
             const secHeadsign = cleanHeadsign(secondary.headsign);
             return (
-              <div className="border-t border-white/5 pt-1.5 text-white/30 text-[10px] flex items-center gap-1.5">
-                <span
-                  className="text-[9px] font-black px-1 py-0.5 rounded shrink-0"
-                  style={{ background: lineColor(secondary.line), color: lineTextColor(secondary.line) }}
-                >
-                  {secondary.line}
-                </span>
-                <span className="truncate">
-                  Also: {routeLabel(secondary.line, secondary.agency)} · {secondary.minutes}m
-                </span>
+              <div className="border-t border-white/5 pt-1.5">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span
+                    className="text-[9px] font-black px-1 py-0.5 rounded shrink-0"
+                    style={{ background: lineColor(secondary.line), color: lineTextColor(secondary.line) }}
+                  >
+                    {secondary.line}
+                  </span>
+                  <span className="text-white/25 text-[10px]">{secondary.minutes}m</span>
+                </div>
+                <div className="text-white/25 text-[10px] leading-snug">
+                  {routeLabel(secondary.line, secondary.agency)}{secHeadsign ? ` → ${secHeadsign}` : ""}
+                </div>
               </div>
             );
           })()}

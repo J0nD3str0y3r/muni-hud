@@ -197,7 +197,7 @@ export default function RoutePanel({
                           {leg.line}
                         </span>
                         {leg.headsign && (
-                          <span className="text-white/40 text-[10px] truncate max-w-[80px]">
+                          <span className="text-white/40 text-[10px]">
                             {leg.headsign}
                           </span>
                         )}
@@ -220,7 +220,7 @@ export default function RoutePanel({
               const transitLeg = opt.legs.find(l => l.mode === "TRANSIT");
               if (!transitLeg) return null;
               return (
-                <div className="text-white/30 text-[9px] mt-1 truncate">
+                <div className="text-white/30 text-[9px] mt-1 leading-snug">
                   {transitLeg.boardStopName} → {transitLeg.alightStopName}
                 </div>
               );

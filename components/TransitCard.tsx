@@ -61,28 +61,30 @@ export default function TransitCard({ route, coords, destinationName }: Props) {
   const alreadyAtStop = remainingWalkSec < 60;
 
   return (
-    <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 py-3 w-52 shadow-2xl space-y-2">
-      {/* Line → headsign • wait */}
-      <div className="flex items-center gap-2">
-        <span
-          className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
-          style={{
-            background: legBg(transitLeg),
-            color: legFg(transitLeg),
-          }}
-        >
-          {transitLeg.line}
-        </span>
-        <span className="text-white text-sm font-semibold truncate">
+    <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 py-3 w-60 shadow-2xl space-y-2">
+      {/* Line + wait on one row, headsign below */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
+            style={{
+              background: legBg(transitLeg),
+              color: legFg(transitLeg),
+            }}
+          >
+            {transitLeg.line}
+          </span>
+          {waitMins !== null && (
+            <span className="text-white/50 text-xs">• {waitMins}m wait</span>
+          )}
+        </div>
+        <div className="text-white text-sm font-semibold leading-snug">
           → {transitLeg.headsign}
-        </span>
-        {waitMins !== null && (
-          <span className="text-white/50 text-xs shrink-0">• {waitMins}m</span>
-        )}
+        </div>
       </div>
 
       {/* Board stop */}
-      <div className="text-white/60 text-xs">
+      <div className="text-white/60 text-xs leading-snug">
         {alreadyAtStop
           ? `At ${transitLeg.boardStopName}`
           : `${formatMins(remainingWalkSec)} walk · ${transitLeg.boardStopName}`}
@@ -90,14 +92,14 @@ export default function TransitCard({ route, coords, destinationName }: Props) {
 
       {/* Alight stop */}
       {transitLeg.alightStopName && (
-        <div className="text-white/40 text-[10px]">
-          Get off at {transitLeg.alightStopName}
+        <div className="text-white/50 text-xs leading-snug">
+          Get off at <span className="text-white/80 font-medium">{transitLeg.alightStopName}</span>
         </div>
       )}
 
       {/* Destination + arrival */}
-      <div className="border-t border-white/10 pt-2 flex items-center justify-between">
-        <span className="text-white/40 text-[10px] truncate max-w-[120px]">
+      <div className="border-t border-white/10 pt-2 flex items-start justify-between gap-2">
+        <span className="text-white/40 text-[10px] leading-snug">
           {destinationName.split(",")[0]}
         </span>
         <span className="text-white/60 text-[10px] tabular-nums shrink-0">
