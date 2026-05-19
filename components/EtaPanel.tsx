@@ -38,6 +38,11 @@ const BART_LINES: Record<string, string> = {
   GREEN: "Green Line", BLUE: "Blue Line",
 };
 
+function isBartLine(line: string): boolean {
+  const key = line.toUpperCase().replace(/[-_][NS]$/, "");
+  return key in BART_LINES || ["YELLOW","ORANGE","GREEN","BLUE","RED"].includes(key);
+}
+
 function routeLabel(line: string, agency?: "MUNI" | "BART"): string {
   if (agency === "BART") return BART_LINES[line.toUpperCase()] ?? `BART ${line}`;
   if (/R$/i.test(line)) return `${line} Rapid`;
@@ -197,10 +202,27 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
   const timeSavedMin = timeSavedSec / 60;
 
   const rec = classify(timeSavedMin);
-  const label = routeLabel(primary.line, primary.agency);
-  const headsign = cleanHeadsign(primary.headsign);
-  const arrLabel = arrivalLabel(primary.minutes, rec);
   const destName = destination.name.split(",")[0];
+
+  // Prefer the best route's transit leg for display — it corresponds to the fastest
+  // option to the destination, which may differ from arrivals[0] (nearest vehicle).
+  const bestTransitLeg = bestTransitRoute?.legs.find((l) => l.mode === "TRANSIT") ?? null;
+
+  const displayLine = bestTransitLeg?.line ?? primary.line;
+  const displayAgency = bestTransitLeg?.line
+    ? (isBartLine(bestTransitLeg.line) ? "BART" : "MUNI")
+    : primary.agency;
+  const displayHeadsign = bestTransitLeg
+    ? cleanHeadsign(bestTransitLeg.headsign ?? "")
+    : cleanHeadsign(primary.headsign);
+  const displayStopName = bestTransitLeg?.boardStopName ?? primary.stopName;
+  // Wait time: from route's waitSec, or fall back to the arrival minutes
+  const displayWaitMin = bestTransitLeg?.waitSec != null
+    ? Math.round(bestTransitLeg.waitSec / 60)
+    : primary.minutes;
+
+  const label = routeLabel(displayLine, displayAgency);
+  const arrLabel = arrivalLabel(displayWaitMin, rec);
 
   // Brighten card when transit is worth taking
   const cardOpacity = rec === "KEEP_MOVING" ? "opacity-60" : "opacity-100";
@@ -208,10 +230,11 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
     ? "border-white/30"
     : "border-white/10";
 
-  // Secondary option (different line, different headsign)
-  const secondary = arrivals.find(
-    (a) => a.line !== primary.line && a.minutes > primary.minutes
-  ) ?? null;
+  // Second-best transit route for the secondary slot
+  const secondBestRoute = routeOptions
+    ?.filter((o) => o.profile === "transit" && o.id !== bestTransitRoute?.id)
+    .sort((a, b) => a.totalDurationSec - b.totalDurationSec)[0] ?? null;
+  const secondBestLeg = secondBestRoute?.legs.find((l) => l.mode === "TRANSIT") ?? null;
 
   return (
     <div className={`bg-black/70 backdrop-blur-md border ${cardBorder} rounded-xl px-4 py-3 w-60 shadow-xl transition-all ${cardOpacity}`}>
@@ -242,18 +265,18 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
           <div className="flex items-center gap-2">
             <span
               className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
-              style={{ background: lineColor(primary.line), color: lineTextColor(primary.line) }}
+              style={{ background: lineColor(displayLine), color: lineTextColor(displayLine) }}
             >
-              {primary.line}
+              {displayLine}
             </span>
-            <span className={`text-xs font-medium ${primary.minutes <= 1 ? "text-amber-400" : "text-white/70"}`}>
-              {arrLabel} · {primary.minutes <= 1 ? "1 min" : `${primary.minutes} min`}
+            <span className={`text-xs font-medium ${displayWaitMin <= 1 ? "text-amber-400" : "text-white/70"}`}>
+              {arrLabel} · {displayWaitMin <= 1 ? "1 min" : `${displayWaitMin} min`}
             </span>
           </div>
 
           {/* Headsign — full text, wraps */}
           <div className="text-white text-xs font-semibold leading-snug">
-            {label}{headsign ? ` → ${headsign}` : ""}
+            {label}{displayHeadsign ? ` → ${displayHeadsign}` : ""}
           </div>
 
           {/* Similar time note for optional */}
@@ -263,26 +286,33 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
 
           {/* Fare + stop — full stop name, wraps */}
           <div className="border-t border-white/10 pt-2 space-y-0.5">
-            <div className="text-white/40 text-[10px]">{fareLabel(primary.agency)}</div>
-            <div className="text-white/30 text-[10px] leading-snug">{primary.stopName}</div>
+            <div className="text-white/40 text-[10px]">{fareLabel(displayAgency)}</div>
+            <div className="text-white/30 text-[10px] leading-snug">{displayStopName}</div>
           </div>
 
-          {/* Secondary option */}
-          {secondary && (() => {
-            const secHeadsign = cleanHeadsign(secondary.headsign);
+          {/* Second-best transit route */}
+          {secondBestLeg && (() => {
+            const secLine = secondBestLeg.line ?? "";
+            const secHeadsign = cleanHeadsign(secondBestLeg.headsign ?? "");
+            const secMins = secondBestLeg.waitSec != null
+              ? Math.round(secondBestLeg.waitSec / 60)
+              : null;
+            const secAgency = isBartLine(secLine) ? "BART" : "MUNI";
             return (
               <div className="border-t border-white/5 pt-1.5">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <span
                     className="text-[9px] font-black px-1 py-0.5 rounded shrink-0"
-                    style={{ background: lineColor(secondary.line), color: lineTextColor(secondary.line) }}
+                    style={{ background: lineColor(secLine), color: lineTextColor(secLine) }}
                   >
-                    {secondary.line}
+                    {secLine}
                   </span>
-                  <span className="text-white/25 text-[10px]">{secondary.minutes}m</span>
+                  {secMins != null && (
+                    <span className="text-white/25 text-[10px]">{secMins}m · {Math.round((secondBestRoute?.totalDurationSec ?? 0) / 60)} min total</span>
+                  )}
                 </div>
                 <div className="text-white/25 text-[10px] leading-snug">
-                  {routeLabel(secondary.line, secondary.agency)}{secHeadsign ? ` → ${secHeadsign}` : ""}
+                  {routeLabel(secLine, secAgency)}{secHeadsign ? ` → ${secHeadsign}` : ""}
                 </div>
               </div>
             );
