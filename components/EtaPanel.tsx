@@ -79,20 +79,21 @@ function fareLabel(agency: "MUNI" | "BART"): string {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-function agencyTypeLabel(line: string, agency: "MUNI" | "BART"): string {
+// "Rapid", "BART", "Local", etc. — short prefix for "X toward Y"
+function transitTypeLabel(line: string, agency: "MUNI" | "BART"): string {
   if (agency === "BART") return "BART";
-  if (/R$/i.test(line)) return "MUNI Rapid";
-  if (/X$/i.test(line)) return "MUNI Express";
-  if (/^[JKLMNT]$/i.test(line)) return "MUNI Metro";
-  if (/^[EF]$/i.test(line)) return "MUNI Streetcar";
-  return "MUNI Local";
+  if (/R$/i.test(line)) return "Rapid";
+  if (/X$/i.test(line)) return "Express";
+  if (/^[JKLMNT]$/i.test(line)) return "Metro";
+  if (/^[EF]$/i.test(line)) return "Streetcar";
+  return "Local";
 }
 
 function walkMin(coords: Coords, stopLat: number, stopLng: number): number {
   return Math.max(1, Math.round(haversineM(coords.lat, coords.lng, stopLat, stopLng) / 1.4 / 60));
 }
 
-// Deduplicate arrivals by line, keeping the soonest per unique line
+// Deduplicate by line, keeping the soonest per unique line
 function dedupe(arrivals: Arrival[]): Arrival[] {
   const seen = new Set<string>();
   return arrivals.filter((a) => {
@@ -100,6 +101,31 @@ function dedupe(arrivals: Arrival[]): Arrival[] {
     seen.add(a.line);
     return true;
   });
+}
+
+type StopGroup = {
+  stopName: string;
+  stopLat: number;
+  stopLng: number;
+  wMin: number;
+  arrivals: Arrival[];
+};
+
+function groupByStop(arrivals: Arrival[], coords: Coords): StopGroup[] {
+  const map = new Map<string, StopGroup>();
+  for (const a of arrivals) {
+    if (!map.has(a.stopName)) {
+      map.set(a.stopName, {
+        stopName: a.stopName,
+        stopLat: a.stopLat,
+        stopLng: a.stopLng,
+        wMin: walkMin(coords, a.stopLat, a.stopLng),
+        arrivals: [],
+      });
+    }
+    map.get(a.stopName)!.arrivals.push(a);
+  }
+  return [...map.values()].sort((a, b) => a.wMin - b.wMin);
 }
 
 export default function EtaPanel({ coords, destination, routeOptions, onStopPin }: Props) {
@@ -145,56 +171,93 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
     if (!primary) return null;
 
     const unique = dedupe(arrivals);
-    const visible = expanded ? unique : unique.slice(0, 2);
-    const hidden = unique.length - 2;
+    const hiddenCount = Math.max(0, unique.length - 2);
+    const groups = groupByStop(arrivals, coords);
 
     return (
       <div className="bg-black/70 backdrop-blur-md border border-white/10 rounded-xl px-4 py-3 w-64 shadow-xl">
         {/* Title */}
-        <div className="text-white/30 text-[9px] font-bold tracking-widest uppercase mb-2.5">
+        <div className="text-white/30 text-[9px] font-bold tracking-widest uppercase mb-3">
           Catch Nearby
         </div>
 
-        {/* Arrival rows */}
-        <div className="space-y-3">
-          {visible.map((a, i) => {
-            const headsign = cleanHeadsign(a.headsign);
-            const wMin = walkMin(coords, a.stopLat, a.stopLng);
-            return (
-              <div key={`${a.line}-${i}`} className={i > 0 ? "border-t border-white/5 pt-3" : ""}>
-                {/* Line badge + minutes */}
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span
-                    className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
-                    style={{ background: lineColor(a.line), color: lineTextColor(a.line) }}
-                  >
-                    {a.line}
-                  </span>
-                  <span className={`text-xs font-semibold tabular-nums ml-auto ${a.minutes <= 1 ? "text-amber-400" : "text-white/80"}`}>
-                    {a.minutes <= 1 ? "now" : `${a.minutes} min`}
-                  </span>
+        {expanded ? (
+          /* ── Expanded: grouped by stop ─────────────────────────────── */
+          <div className="space-y-4">
+            {groups.map((g) => (
+              <div key={g.stopName}>
+                {/* Stop header */}
+                <div className="text-white/50 text-[10px] font-semibold mb-1.5">
+                  {g.stopName} · {g.wMin} min walk
                 </div>
-                {/* Agency type · toward headsign */}
-                <div className="text-white/55 text-[10px] leading-snug mb-0.5">
-                  {agencyTypeLabel(a.line, a.agency)}
-                  {headsign ? ` · toward ${headsign}` : ""}
-                </div>
-                {/* Walk time · stop name (stop name only in expanded) */}
-                <div className="text-white/30 text-[10px] leading-snug">
-                  {wMin} min walk{expanded ? ` · ${a.stopName}` : ""}
+                {/* All arrivals at this stop */}
+                <div className="space-y-1.5 pl-1">
+                  {g.arrivals.map((a, i) => {
+                    const headsign = cleanHeadsign(a.headsign);
+                    return (
+                      <div key={`${a.line}-${i}`} className="flex items-center gap-2">
+                        <span
+                          className="text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"
+                          style={{ background: lineColor(a.line), color: lineTextColor(a.line) }}
+                        >
+                          {a.line}
+                        </span>
+                        <span className={`text-[10px] tabular-nums shrink-0 ${a.minutes <= 1 ? "text-amber-400" : "text-white/60"}`}>
+                          {a.minutes <= 1 ? "now" : `${a.minutes} min`}
+                        </span>
+                        {headsign && (
+                          <span className="text-white/30 text-[10px] leading-snug">
+                            toward {headsign}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : (
+          /* ── Collapsed: best 2 individual departures ───────────────── */
+          <div className="space-y-3">
+            {unique.slice(0, 2).map((a, i) => {
+              const headsign = cleanHeadsign(a.headsign);
+              const wMin = walkMin(coords, a.stopLat, a.stopLng);
+              return (
+                <div key={a.line} className={i > 0 ? "border-t border-white/5 pt-3" : ""}>
+                  {/* Line badge + minutes */}
+                  <div className="flex items-center justify-between mb-1">
+                    <span
+                      className="text-[11px] font-black px-2 py-0.5 rounded"
+                      style={{ background: lineColor(a.line), color: lineTextColor(a.line) }}
+                    >
+                      {a.line}
+                    </span>
+                    <span className={`text-xs font-semibold tabular-nums ${a.minutes <= 1 ? "text-amber-400" : "text-white/80"}`}>
+                      {a.minutes <= 1 ? "now" : `${a.minutes} min`}
+                    </span>
+                  </div>
+                  {/* Go to stop · walk */}
+                  <div className="text-white/50 text-[10px] leading-snug mb-0.5">
+                    Go to {a.stopName} · {wMin} min walk
+                  </div>
+                  {/* Type toward headsign */}
+                  <div className="text-white/30 text-[10px] leading-snug">
+                    {transitTypeLabel(a.line, a.agency)}{headsign ? ` toward ${headsign}` : ""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Expand / collapse */}
-        {unique.length > 2 && (
+        {/* Expand / collapse affordance */}
+        {(hiddenCount > 0 || expanded) && (
           <button
             onClick={() => setExpanded((e) => !e)}
             className="mt-3 pt-2 border-t border-white/5 w-full text-left text-white/25 text-[10px] hover:text-white/50 transition-colors"
           >
-            {expanded ? "▲ show less" : `+${hidden} more nearby`}
+            {expanded ? "▲ show less" : `+${hiddenCount} more nearby`}
           </button>
         )}
       </div>
