@@ -79,9 +79,33 @@ function fareLabel(agency: "MUNI" | "BART"): string {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
+function agencyTypeLabel(line: string, agency: "MUNI" | "BART"): string {
+  if (agency === "BART") return "BART";
+  if (/R$/i.test(line)) return "MUNI Rapid";
+  if (/X$/i.test(line)) return "MUNI Express";
+  if (/^[JKLMNT]$/i.test(line)) return "MUNI Metro";
+  if (/^[EF]$/i.test(line)) return "MUNI Streetcar";
+  return "MUNI Local";
+}
+
+function walkMin(coords: Coords, stopLat: number, stopLng: number): number {
+  return Math.max(1, Math.round(haversineM(coords.lat, coords.lng, stopLat, stopLng) / 1.4 / 60));
+}
+
+// Deduplicate arrivals by line, keeping the soonest per unique line
+function dedupe(arrivals: Arrival[]): Arrival[] {
+  const seen = new Set<string>();
+  return arrivals.filter((a) => {
+    if (seen.has(a.line)) return false;
+    seen.add(a.line);
+    return true;
+  });
+}
+
 export default function EtaPanel({ coords, destination, routeOptions, onStopPin }: Props) {
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!coords) return;
@@ -120,47 +144,59 @@ export default function EtaPanel({ coords, destination, routeOptions, onStopPin 
   if (!destination) {
     if (!primary) return null;
 
-    const label = routeLabel(primary.line, primary.agency);
-    const headsign = cleanHeadsign(primary.headsign);
+    const unique = dedupe(arrivals);
+    const visible = expanded ? unique : unique.slice(0, 2);
+    const hidden = unique.length - 2;
 
     return (
-      <div className="bg-black/60 backdrop-blur-md border border-white/10 rounded-xl px-4 py-3 w-56">
-        <div className="flex items-center gap-2 mb-0.5">
-          <span
-            className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
-            style={{ background: lineColor(primary.line), color: lineTextColor(primary.line) }}
+      <div className="bg-black/70 backdrop-blur-md border border-white/10 rounded-xl px-4 py-3 w-64 shadow-xl">
+        {/* Title */}
+        <div className="text-white/30 text-[9px] font-bold tracking-widest uppercase mb-2.5">
+          Catch Nearby
+        </div>
+
+        {/* Arrival rows */}
+        <div className="space-y-3">
+          {visible.map((a, i) => {
+            const headsign = cleanHeadsign(a.headsign);
+            const wMin = walkMin(coords, a.stopLat, a.stopLng);
+            return (
+              <div key={`${a.line}-${i}`} className={i > 0 ? "border-t border-white/5 pt-3" : ""}>
+                {/* Line badge + minutes */}
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span
+                    className="text-[11px] font-black px-2 py-0.5 rounded shrink-0"
+                    style={{ background: lineColor(a.line), color: lineTextColor(a.line) }}
+                  >
+                    {a.line}
+                  </span>
+                  <span className={`text-xs font-semibold tabular-nums ml-auto ${a.minutes <= 1 ? "text-amber-400" : "text-white/80"}`}>
+                    {a.minutes <= 1 ? "now" : `${a.minutes} min`}
+                  </span>
+                </div>
+                {/* Agency type · toward headsign */}
+                <div className="text-white/55 text-[10px] leading-snug mb-0.5">
+                  {agencyTypeLabel(a.line, a.agency)}
+                  {headsign ? ` · toward ${headsign}` : ""}
+                </div>
+                {/* Walk time · stop name (stop name only in expanded) */}
+                <div className="text-white/30 text-[10px] leading-snug">
+                  {wMin} min walk{expanded ? ` · ${a.stopName}` : ""}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Expand / collapse */}
+        {unique.length > 2 && (
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="mt-3 pt-2 border-t border-white/5 w-full text-left text-white/25 text-[10px] hover:text-white/50 transition-colors"
           >
-            {primary.line}
-          </span>
-          <span className="text-white/50 text-[10px]">
-            {primary.minutes <= 1 ? "Leaving now" : `${primary.minutes} min`}
-          </span>
-        </div>
-        <div className="text-white/70 text-xs leading-snug mb-1">
-          {label}{headsign ? ` → ${headsign}` : ""}
-        </div>
-        <div className="text-white/35 text-[10px] leading-snug">{primary.stopName}</div>
-        {/* Secondary arrival */}
-        {arrivals[1] && (() => {
-          const sec = arrivals[1];
-          const secHeadsign = cleanHeadsign(sec.headsign);
-          return (
-            <div className="mt-2 pt-2 border-t border-white/5">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span
-                  className="text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"
-                  style={{ background: lineColor(sec.line), color: lineTextColor(sec.line) }}
-                >
-                  {sec.line}
-                </span>
-                <span className="text-white/25 text-[10px]">{sec.minutes}m</span>
-              </div>
-              <div className="text-white/25 text-[10px] leading-snug">
-                {routeLabel(sec.line, sec.agency)}{secHeadsign ? ` → ${secHeadsign}` : ""}
-              </div>
-            </div>
-          );
-        })()}
+            {expanded ? "▲ show less" : `+${hidden} more nearby`}
+          </button>
+        )}
       </div>
     );
   }
